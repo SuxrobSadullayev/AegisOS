@@ -5,6 +5,7 @@ from runtime.src.reasoning import (
     DecisionGraph,
     ReasoningNode,
     NodeType,
+    Confidence,
     SelfReview
 )
 
@@ -22,7 +23,8 @@ class TestReasoningIntegration(unittest.TestCase):
         graph.add_node(ReasoningNode("N3", NodeType.CONSTRAINT, "No lock allowed on network"))
 
         reviewer = SelfReview()
-        is_approved, comments = reviewer.review(graph, confidence=0.85, threshold=0.70)
+        conf = Confidence(score=0.85, is_threshold_met=True, evaluated_claim_count=3)
+        is_approved, comments = reviewer.review(graph, confidence=conf, threshold=0.70)
         self.assertFalse(is_approved)
         self.assertIn("Conflict between N2 and N3", comments[0])
 
