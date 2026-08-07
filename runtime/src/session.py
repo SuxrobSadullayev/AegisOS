@@ -207,6 +207,14 @@ class PersistenceManager:
 
         return snapshot
 
+    def verify_integrity(self, snapshot: Snapshot) -> bool:
+        """Verifies SHA-256 checksum integrity of a session snapshot."""
+        if not snapshot or not snapshot.checksum or not snapshot.serialized_data:
+            return False
+        expected = hashlib.sha256(snapshot.serialized_data.encode("utf-8")).hexdigest()
+        return snapshot.checksum == expected
+
+
     def load_session(self, session_id: str) -> Optional[SessionContext]:
         file_path = os.path.join(self.storage_dir, f"{session_id}.json")
         if not os.path.exists(file_path):

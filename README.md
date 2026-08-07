@@ -8,7 +8,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-2.1.0--production-green.svg)](CHANGELOG.md)
-[![Build Status](https://img.shields.io/badge/tests-191%20passed-brightgreen.svg)](runtime/tests/)
+[![Build Status](https://img.shields.io/badge/tests-219%20passed-brightgreen.svg)](runtime/tests/)
+
 
 </div>
 
@@ -202,12 +203,25 @@ Aegis features an **extensible Plugin Operating System Architecture**:
 
 ---
 
+## 🔒 Adversarial Security & Runtime Resilience Validation
+
+Aegis AI OS has undergone rigorous adversarial attack and security validation across 219 comprehensive test suites:
+
+- **Adversarial Prompt Injection Protection**: Hardened against prompt injection attempts, system prompt leakage, rules override instructions, and unauthorized permission mutations.
+- **Epistemic Truth Guarding**: Prevents unsubstantiated claims from self-declaring as `VERIFIED_FACT` without Level 4/5 evidence.
+- **Default DENY Plugin Capability Tokens**: Enforces granular permissions (`FILESYSTEM_READ`, `FILESYSTEM_WRITE`, `NETWORK_OUTBOUND`, `SECRET_ACCESS`, `PROCESS_EXECUTE`, `RUNTIME_MODIFY`, `PIPELINE_MODIFY`).
+- **Secret Leakage Redaction**: Redacts sensitive API keys and token strings across logs, exceptions, `repr()`, snapshots, and quality reports.
+- **Gateway HTTP Resilience**: Exponential backoff and retry handling for HTTP 429 (Rate Limit), 500/502 (Server Error), and timeout conditions.
+- **Session Snapshot SHA-256 Checksums**: Integrity verification for persistent disk snapshots detecting file corruption and payload tampering.
+
+---
+
 ## 🧪 Testing & Validation
 
-Run the complete test suite (191 tests passing):
+Run the complete test suite (219 tests passing):
 
 ```bash
-# Execute full unit and integration test suite
+# Execute full unit, integration, and security test suite
 python3 -m unittest discover -s runtime/tests -p "test_*.py"
 
 # Run Aegis Module Contract Validator
@@ -221,6 +235,7 @@ python3 runtime/examples/chat_demo.py
 python3 runtime/examples/e2e_demo.py
 python3 runtime/examples/provider_demo.py
 ```
+
 
 ---
 
