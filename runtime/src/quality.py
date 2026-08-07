@@ -46,7 +46,8 @@ class QualityPipeline:
                 f"Your previous output failed the following Quality Gates: {', '.join(failed_gates)}.\n"
                 f"Please refine your solution to strictly pass all Quality Gates."
             )
-            curr_response = self.gateway.generate_response(system_prompt, feedback_prompt)
+            curr_response_obj = self.gateway.generate(system_prompt, feedback_prompt)
+            curr_response = curr_response_obj.text if hasattr(curr_response_obj, 'text') else str(curr_response_obj)
 
         return QualityValidationResult(
             status=QualityStatus.FAIL,

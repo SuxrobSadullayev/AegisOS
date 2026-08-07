@@ -1,12 +1,12 @@
 import unittest
 from runtime.src.config import AegisConfig, QualityStatus
-from runtime.src.gateway import GeminiModelProvider
+from runtime.src.gateway import MockProvider
 from runtime.src.quality import QualityPipeline
 
 class TestQualityPipeline(unittest.TestCase):
     def setUp(self):
         self.config = AegisConfig(max_retries=2)
-        self.gateway = GeminiModelProvider(self.config)
+        self.gateway = MockProvider(self.config)
         self.pipeline = QualityPipeline(self.config, self.gateway)
 
     def test_pass_validation(self):
