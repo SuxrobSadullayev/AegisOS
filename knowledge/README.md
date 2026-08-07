@@ -1,36 +1,22 @@
-# Knowledge — Persistent Knowledge Base
+# Layer 1: Knowledge — Descriptive Experience Base
 
 ## Purpose
 
-The `knowledge/` directory contains a **persistent, curated knowledge base** of
-engineering wisdom. Unlike modules (which define standards), knowledge files
-capture lessons learned, case studies, and real-world patterns from practice.
+The `knowledge/` directory contains a **descriptive knowledge base** of real-world
+engineering wisdom, patterns, anti-patterns, case studies, and lessons learned.
+Unlike `modules/` (which are prescriptive standards), `knowledge/` captures
+experience and evidence ("what was learned").
 
-## Design Goals
+## Structure
 
-- Accumulate engineering wisdom over time.
-- Provide concrete, experience-based guidance beyond theoretical standards.
-- Make knowledge searchable and categorized.
-- Enable agents to learn from past decisions.
+| Directory | Purpose |
+|:----------|:--------|
+| `practices/` | Proven engineering practices across domains |
+| `patterns/` | Reusable architectural and implementation patterns |
+| `anti-patterns/` | Common pitfalls with root cause analysis |
+| `case-studies/` | Real-world post-mortems and engineering retrospectives |
 
-## Contents
+## Dependency Rules
 
-| Directory | Purpose | Status |
-|:----------|:--------|:-------|
-| `best-practices/` | Proven engineering practices across domains | Planned |
-| `anti-patterns/` | Common mistakes with root cause analysis | Planned |
-| `case-studies/` | Real-world examples of engineering decisions | Planned |
-| `lessons-learned/` | Post-mortem insights and retrospective knowledge | Planned |
-
-## Usage
-
-Knowledge files are referenced on demand. Agents can search the knowledge base
-when encountering unfamiliar patterns or when a decision requires historical
-context.
-
-## Future Improvements
-
-- Tagging system for cross-referencing knowledge entries.
-- Automatic knowledge extraction from code review sessions.
-- Community-contributed case studies.
-- RAG integration for semantic knowledge retrieval.
+- **Allowed**: Completely independent.
+- **Forbidden**: No dependencies on `runtime/`, `tools/`, or `examples/`.

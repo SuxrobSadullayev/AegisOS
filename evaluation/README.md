@@ -1,29 +1,18 @@
-# Evaluation — Framework Self-Evaluation
+# Layer 3: Evaluation — Objective Framework Metrics
 
 ## Purpose
 
-The `evaluation/` directory contains tools and rubrics for **evaluating the
-effectiveness** of the Aegis framework itself. This includes benchmarks,
-scoring rubrics, and self-review protocols.
+The `evaluation/` directory contains tools and test suites for **objectively measuring**
+the effectiveness of the Aegis framework.
 
-## Design Goals
+## Structure
 
-- Provide objective measures of framework effectiveness.
-- Enable comparison between agent output with and without Aegis.
-- Support continuous improvement through measurable feedback.
-- Maintain intellectual honesty about limitations.
+| Directory | Purpose |
+|:----------|:--------|
+| `benchmarks/` | Standardized agent benchmark tasks |
+| `metrics/` | Objective metric definitions and calculation scripts |
+| `regression/` | Automated regression tests for framework output |
 
-## Contents
+## Dependency Rules
 
-| Directory | Purpose | Status |
-|:----------|:--------|:-------|
-| `benchmarks/` | Standardized tasks for measuring agent improvement | Planned |
-| `rubrics/` | Scoring criteria for evaluating agent output quality | Planned |
-| `self-review/` | Protocols for the framework to evaluate its own modules | Planned |
-
-## Future Improvements
-
-- Automated benchmark execution pipeline.
-- Community benchmark contributions.
-- Statistical analysis tools for benchmark results.
-- A/B testing framework for module effectiveness.
+- **Allowed**: `evaluation/` → `runtime/`, `evaluation/` → `core/`

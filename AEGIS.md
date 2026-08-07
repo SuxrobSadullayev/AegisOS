@@ -1,5 +1,5 @@
 # AEGIS AI FRAMEWORK
-<!-- Version: 0.1.0 | Last Updated: 2025-08-07 -->
+<!-- Version: 0.2.0 | Last Updated: 2025-08-07 -->
 
 > **Aegis** is an agent-agnostic AI engineering framework that upgrades the
 > reasoning quality of LLM-based coding agents through structured context,
@@ -8,58 +8,61 @@
 
 ---
 
-## Loading Protocol
+## Loading Protocol & Execution Pipeline
 
-This file is the **root manifest**. When an agent reads this file, it should
-load the Constitutional Core (Tier 1) and selectively load Domain Modules
-(Tier 2) based on the current task.
+Aegis processes context through a 4-stage execution pipeline:
 
-### Tier 1 — Constitutional Core (Always Load)
+```
+Knowledge Layer (core/, modules/, knowledge/)
+       │
+       ▼
+Runtime Loader (runtime/loaders/)
+       │
+       ▼
+Module Resolver (runtime/resolvers/)
+       │
+       ▼
+Prompt Generator (runtime/generators/)
+       │
+       ▼
+Adapter Transformer (runtime/adapters/)
+       │
+       ▼
+Target AI Agent
+```
 
-These files define non-negotiable behavioral standards:
+### Layer 0 — Core (Always Loaded)
+
+These files define non-negotiable operating rules, engines, and contracts:
 
 | File | Purpose |
 |:-----|:--------|
-| [core/constitution.md](core/constitution.md) | Immutable operating rules — the OS for agent conduct |
-| [core/truth-engine.md](core/truth-engine.md) | Truth Engine — 5 epistemic categories for claim classification |
-| [core/reasoning-engine.md](core/reasoning-engine.md) | Reasoning Engine — 9 structured reasoning capabilities |
-| [core/workflow.md](core/workflow.md) | The 10-step engineering workflow |
-| [core/quality-engine.md](core/quality-engine.md) | Quality Engine — 8 independent review gates with deterministic checklists |
+| [core/kernel/constitution.md](core/kernel/constitution.md) | Immutable operating rules — the OS for agent conduct |
+| [core/engines/truth-engine.md](core/engines/truth-engine.md) | Truth Engine — 5 epistemic categories for claim classification |
+| [core/engines/reasoning-engine.md](core/engines/reasoning-engine.md) | Reasoning Engine — 9 structured reasoning capabilities |
+| [core/workflow/workflow.md](core/workflow/workflow.md) | The 10-step universal engineering workflow |
+| [core/engines/quality-engine.md](core/engines/quality-engine.md) | Quality Engine — 8 independent review gates |
+| [core/contracts/module.md](core/contracts/module.md) | Standard interface contract for all Aegis modules |
 
-### Tier 2 — Domain Modules (Load On Demand)
+### Layer 1 — Domain Modules & Knowledge (Loaded On Demand)
 
-Load only the modules relevant to the current task:
+| Directory | Purpose |
+|:----------|:--------|
+| [modules/domains/languages/](modules/domains/languages/) | Language-specific engineering standards (Python, TS, Rust, C, C++) |
+| [modules/domains/engineering/](modules/domains/engineering/) | Engineering disciplines (Architecture, Testing, Security, Performance, Debugging, Refactoring, Review, Docs) |
+| [modules/domains/platforms/](modules/domains/platforms/) | Platform domain standards (Backend, Frontend, Linux, DevOps) |
+| [modules/standards/](modules/standards/) | Cross-cutting engineering standards (Naming, Formatting, Versioning) |
+| [modules/workflows/](modules/workflows/) | Reusable task workflow recipes |
+| [knowledge/](knowledge/) | Descriptive knowledge base (Practices, Patterns, Anti-Patterns, Case Studies) |
 
-| Module | When to Load |
-|:-------|:-------------|
-| [modules/architecture/](modules/architecture/) | Designing systems, making architectural decisions |
-| [modules/languages/python/](modules/languages/python/) | Writing or reviewing Python code |
-| [modules/languages/typescript/](modules/languages/typescript/) | Writing or reviewing TypeScript code |
-| [modules/languages/rust/](modules/languages/rust/) | Writing or reviewing Rust code |
-| [modules/languages/c/](modules/languages/c/) | Writing or reviewing C code |
-| [modules/languages/cpp/](modules/languages/cpp/) | Writing or reviewing C++ code |
-| [modules/backend/](modules/backend/) | API design, databases, server-side logic |
-| [modules/frontend/](modules/frontend/) | UI components, state management, accessibility |
-| [modules/testing/](modules/testing/) | Writing tests, test strategy decisions |
-| [modules/security/](modules/security/) | Security review, threat modeling, secure coding |
-| [modules/performance/](modules/performance/) | Profiling, optimization, benchmarking |
-| [modules/debugging/](modules/debugging/) | Systematic debugging, root cause analysis |
-| [modules/refactoring/](modules/refactoring/) | Code restructuring, technical debt reduction |
-| [modules/code-review/](modules/code-review/) | Reviewing code, providing feedback |
-| [modules/documentation/](modules/documentation/) | Writing or improving documentation |
-| [modules/git/](modules/git/) | Version control workflows, commit standards |
-| [modules/devops/](modules/devops/) | CI/CD, Docker, Kubernetes, deployment |
-| [modules/linux/](modules/linux/) | System administration, shell scripting |
+### Layer 2 — Runtime & Tooling (Execution & Validation)
 
-### Tier 3 — Templates & Knowledge (Reference As Needed)
-
-| Resource | Purpose |
-|:---------|:--------|
-| [templates/prompts/](templates/prompts/) | Structured prompt templates for common tasks |
-| [templates/checklists/](templates/checklists/) | Pre/post implementation checklists |
-| [templates/decision-trees/](templates/decision-trees/) | Decision frameworks for technology and architecture |
-| [knowledge/](knowledge/) | Persistent knowledge base: best practices, anti-patterns, case studies |
-| [examples/](examples/) | Complete worked examples |
+| Directory | Purpose |
+|:----------|:--------|
+| [runtime/](runtime/) | Execution pipeline: Loaders, Resolvers, Generators, Adapters |
+| [evaluation/](evaluation/) | Framework benchmarks, metrics, and regression testing |
+| [tools/](tools/) | Development tools: Validators, Linters, Scaffolding |
+| [examples/](examples/) | End-to-end usage examples and integrations |
 
 ---
 
@@ -78,47 +81,15 @@ These rules override all other instructions:
 
 ---
 
-## Engineering Workflow
-
-For every engineering task, follow this sequence:
-
-```
-Understand → Analyze → Plan → Identify Risks → Implement → Review → Optimize → Test → Self-Critique → Deliver
-```
-
-See [core/workflow.md](core/workflow.md) for the complete protocol.
-
----
-
-## Self-Review Criteria
-
-Every generated artifact must be reviewed against these 10 dimensions:
-
-| # | Dimension | Question |
-|:--|:----------|:---------|
-| 1 | Correctness | Does it work as intended? Are edge cases handled? |
-| 2 | Consistency | Does it follow established patterns and conventions? |
-| 3 | Completeness | Are all requirements addressed? Is anything missing? |
-| 4 | Maintainability | Can another engineer understand and modify this easily? |
-| 5 | Security | Are there any vulnerabilities? Is input validated? |
-| 6 | Performance | Are there unnecessary allocations, loops, or I/O? |
-| 7 | Readability | Is the code/document clear without extensive comments? |
-| 8 | Reusability | Can components be reused in other contexts? |
-| 9 | Modularity | Are concerns properly separated? |
-| 10 | Scalability | Will this work as the system grows? |
-
----
-
 ## Compatibility
 
-Aegis works with any LLM agent that reads context files:
+Aegis works with any LLM agent via model-specific adapters in `runtime/adapters/`:
 
-- Claude Code / Claude Desktop → via `adapters/claude/`
-- Gemini CLI / Gemini App → via `adapters/gemini/`
-- Cursor → via `adapters/cursor/`
-- Windsurf → via `adapters/windsurf/`
-- OpenAI Codex / ChatGPT → via `adapters/codex/`
-- Kiro, OpenCode, Qwen Code → via `adapters/generic/`
-- Any future agent → via `adapters/generic/`
-
-See [adapters/README.md](adapters/README.md) for setup instructions.
+- Claude Code / Claude Desktop → via `runtime/adapters/claude/`
+- Gemini CLI / Gemini App → via `runtime/adapters/gemini/`
+- Cursor → via `runtime/adapters/cursor/`
+- Windsurf → via `runtime/adapters/windsurf/`
+- OpenAI Codex / ChatGPT → via `runtime/adapters/codex/`
+- Kiro → via `runtime/adapters/kiro/`
+- Qwen Code → via `runtime/adapters/qwen/`
+- Generic / Future Agents → via `runtime/adapters/generic/`
