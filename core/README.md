@@ -19,11 +19,11 @@ workflow that every agent must follow.
 
 | File | Purpose | Status |
 |:-----|:--------|:-------|
-| `constitution.md` | Behavioral rules — the operating system for agent conduct | Planned |
-| `truth-policy.md` | Epistemic standards: fact vs inference vs hypothesis vs unknown | Planned |
-| `reasoning.md` | Structured reasoning protocols | Planned |
+| `constitution.md` | Immutable operating rules — 7 mandatory, 5 recommended | ✅ Complete |
+| `truth-engine.md` | Truth Engine — 5 epistemic categories for claim classification | Planned |
+| `reasoning-engine.md` | Reasoning Engine — 9 structured reasoning capabilities | Planned |
 | `workflow.md` | The 10-step engineering workflow | Planned |
-| `quality-gates.md` | Deterministic and semantic quality gates | Planned |
+| `quality-engine.md` | Quality Engine — 8 independent review gates | Planned |
 
 ## Token Budget
 

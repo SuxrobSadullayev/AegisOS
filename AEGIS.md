@@ -20,11 +20,11 @@ These files define non-negotiable behavioral standards:
 
 | File | Purpose |
 |:-----|:--------|
-| [core/constitution.md](core/constitution.md) | Behavioral rules — the operating system for agent conduct |
-| [core/truth-policy.md](core/truth-policy.md) | Epistemic discipline — fact vs inference vs hypothesis vs unknown |
-| [core/reasoning.md](core/reasoning.md) | Structured reasoning protocols |
+| [core/constitution.md](core/constitution.md) | Immutable operating rules — the OS for agent conduct |
+| [core/truth-engine.md](core/truth-engine.md) | Truth Engine — 5 epistemic categories for claim classification |
+| [core/reasoning-engine.md](core/reasoning-engine.md) | Reasoning Engine — 9 structured reasoning capabilities |
 | [core/workflow.md](core/workflow.md) | The 10-step engineering workflow |
-| [core/quality-gates.md](core/quality-gates.md) | Deterministic and semantic quality gates |
+| [core/quality-engine.md](core/quality-engine.md) | Quality Engine — 8 independent review gates with deterministic checklists |
 
 ### Tier 2 — Domain Modules (Load On Demand)
 
