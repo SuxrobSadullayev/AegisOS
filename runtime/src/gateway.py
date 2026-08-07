@@ -372,11 +372,21 @@ class OpenRouterProvider(BaseHTTPProvider):
 
 
 class ModelGatewayFactory:
-    """Factory router for instantiating model providers."""
+    """Factory router for instantiating model providers with plugin extension support."""
 
-    @staticmethod
-    def get_provider(provider_name: str, config: AegisConfig) -> ModelGatewayInterface:
+    _custom_providers: Dict[str, Callable[[AegisConfig], ModelGatewayInterface]] = {}
+
+    @classmethod
+    def register_provider(cls, provider_name: str, factory_fn: Callable[[AegisConfig], ModelGatewayInterface]) -> None:
+        """Plugins can register custom model providers."""
+        cls._custom_providers[provider_name.lower().strip()] = factory_fn
+
+    @classmethod
+    def get_provider(cls, provider_name: str, config: AegisConfig) -> ModelGatewayInterface:
         p = provider_name.lower().strip()
+        if p in cls._custom_providers:
+            return cls._custom_providers[p](config)
+
         if p == "gemini":
             return GeminiProvider(config)
         elif p == "claude":
@@ -389,3 +399,4 @@ class ModelGatewayFactory:
             return MockProvider(config)
         else:
             raise ValueError(f"Unsupported model provider: '{provider_name}'")
+

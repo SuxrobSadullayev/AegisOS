@@ -1,0 +1,24 @@
+plugin_id: "aegis.capability.security"
+name: "Aegis Security Enforcement Plugin"
+version: "1.0.0"
+description: "Provides security auditing, secret leakage prevention, and input sanitization gates for Aegis."
+author: "Aegis Security Team"
+publisher: "Aegis Core"
+license: "MIT"
+aegis_compatibility: ">=2.0.0"
+python_compatibility: ">=3.12"
+entry_point: "plugin.py"
+priority: 5
+sandbox_level: "STRICT"
+capabilities:
+  - QUALITY_VALIDATOR
+  - PROMPT_TRANSFORMER
+permissions:
+  - SECRET_ACCESS
+  - PIPELINE_MODIFY
+hooks:
+  - BEFORE_QUALITY
+  - AFTER_GENERATION
+config:
+  scan_hardcoded_keys: true
+  scan_private_keys: true

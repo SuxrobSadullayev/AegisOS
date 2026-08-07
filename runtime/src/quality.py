@@ -239,7 +239,7 @@ class QualityPipeline:
     def __init__(self, config: AegisConfig, model_gateway: Optional[ModelGatewayInterface] = None):
         self.config = config
         self.model_gateway = model_gateway
-        self.validators: List[QualityValidator] = [
+        self._core_validators: List[QualityValidator] = [
             HallucinationValidator(),
             PromptInjectionResidueValidator(),
             FormattingValidator(),
@@ -247,6 +247,27 @@ class QualityPipeline:
             LowConfidenceValidator(),
             ArchitectureViolationValidator(),
         ]
+        self.plugin_validators: List[QualityValidator] = []
+
+    @property
+    def validators(self) -> List[QualityValidator]:
+        """Combined list of core validators (always enforced) and plugin validators."""
+        return self._core_validators + self.plugin_validators
+
+    def register_validator(self, validator: QualityValidator) -> None:
+        """Plugins can add custom quality rules/validators."""
+        if validator not in self.plugin_validators:
+            self.plugin_validators.append(validator)
+
+    def unregister_validator(self, validator: QualityValidator) -> bool:
+        """Plugins cannot disable core kernel or security validators."""
+        if validator in self._core_validators:
+            raise PermissionError("Core kernel and security quality validators cannot be removed by plugins")
+        if validator in self.plugin_validators:
+            self.plugin_validators.remove(validator)
+            return True
+        return False
+
 
     def validate(self, context: QualityContext) -> QualityReport:
         """Executes all validators deterministically and returns a QualityReport."""

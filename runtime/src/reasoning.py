@@ -497,8 +497,19 @@ class ReasoningPipeline:
 
     def __init__(self, config: AegisConfig, strategy: Optional[ReasoningStrategy] = None):
         self.config = config
-        self.strategy = strategy or DefaultReasoningStrategy(config)
+        self.default_strategy = strategy or DefaultReasoningStrategy(config)
+        self.strategies: Dict[str, ReasoningStrategy] = {"default": self.default_strategy}
 
-    def run(self, task_prompt: str, depth: ReasoningDepth = ReasoningDepth.L2_STANDARD) -> ReasoningResult:
+    def register_strategy(self, name: str, strategy: ReasoningStrategy) -> None:
+        """Plugins can register custom reasoning strategies."""
+        self.strategies[name] = strategy
+
+    def get_strategy(self, name: str = "default") -> ReasoningStrategy:
+        """Returns a registered reasoning strategy or fallback to default."""
+        return self.strategies.get(name, self.default_strategy)
+
+    def run(self, task_prompt: str, depth: ReasoningDepth = ReasoningDepth.L2_STANDARD, strategy_name: str = "default") -> ReasoningResult:
         context = ReasoningContext(task_prompt=task_prompt, depth=depth)
-        return self.strategy.execute_strategy(context)
+        selected_strategy = self.get_strategy(strategy_name)
+        return selected_strategy.execute_strategy(context)
+

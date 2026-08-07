@@ -240,8 +240,9 @@ class TruthEngineStage(PipelineStage):
 class PromptComposerStage(PipelineStage):
     """Stage 6: Prompt Composition & Token Budget Enforcer."""
 
-    def __init__(self):
+    def __init__(self, plugin_manager: Optional[Any] = None):
         super().__init__("PromptComposerStage")
+        self.plugin_manager = plugin_manager
 
     def execute(self, context: OrchestratorContext, tracer: PipelineTracer) -> StageResult:
         start_time = time.time()
@@ -255,11 +256,13 @@ class PromptComposerStage(PipelineStage):
             gate_passed=True,
         )
 
-        composed_prompt = composer.compose(resolved_ctx, trace)
+        contribs = self.plugin_manager.get_prompt_contributions() if self.plugin_manager else None
+        composed_prompt = composer.compose(resolved_ctx, trace, plugin_contributions=contribs)
         new_ctx = context.copy_with(composed_prompt=composed_prompt)
         duration = (time.time() - start_time) * 1000.0
         tracer.record_metric(self.name, duration)
         return StageResult(success=True, context=new_ctx)
+
 
 
 class ModelGatewayStage(PipelineStage):
@@ -352,14 +355,20 @@ class AutoRepairStage(PipelineStage):
 
 
 class RuntimeOrchestrator:
-    """Central Aegis Runtime Orchestrator Machine."""
+    """Central Aegis Runtime Orchestrator Machine with Plugin System Integration."""
 
-    def __init__(self, config: AegisConfig, model_provider: Optional[ModelGatewayInterface] = None):
+    def __init__(
+        self,
+        config: AegisConfig,
+        model_provider: Optional[ModelGatewayInterface] = None,
+        plugin_manager: Optional[Any] = None,
+    ):
         self.config = config
         self.event_bus = PipelineEventBus()
         self.tracer = PipelineTracer()
         self.graph_store = EpistemicGraphStore()
         self.provider = model_provider or ModelGatewayFactory.get_provider("mock", config)
+        self.plugin_manager = plugin_manager
         self.stages: List[PipelineStage] = []
 
         # Register default 9 core pipeline stages
@@ -372,7 +381,7 @@ class RuntimeOrchestrator:
             KnowledgeLoaderStage(),
             ReasoningEngineStage(self.graph_store),
             TruthEngineStage(self.graph_store),
-            PromptComposerStage(),
+            PromptComposerStage(self.plugin_manager),
             ModelGatewayStage(self.provider),
             QualityEngineStage(self.provider),
             AutoRepairStage(self.provider),
@@ -385,8 +394,18 @@ class RuntimeOrchestrator:
         else:
             self.stages.append(stage)
 
+    def _dispatch_hook(self, hook_name: str, payload: Dict[str, Any]) -> None:
+        """Dispatches pipeline hooks via plugin_manager if available."""
+        if not self.plugin_manager:
+            return
+        from runtime.src.plugin import PluginHook
+        member_map = getattr(PluginHook, "_value2member_map_", {})
+        if hook_name in member_map:
+            hook_enum = PluginHook(hook_name)
+            self.plugin_manager.dispatch_hook(hook_enum, payload, fail_safe=True)
+
     def run(self, user_prompt: str) -> OrchestratorContext:
-        """Executes the complete Aegis pipeline with rollback and event tracking."""
+        """Executes the complete Aegis pipeline with rollback, event tracking, and plugin hooks."""
         initial_ctx = OrchestratorContext(user_prompt=user_prompt, config=self.config)
         curr_ctx = initial_ctx
 
@@ -396,7 +415,16 @@ class RuntimeOrchestrator:
             message=f"Starting Aegis pipeline for task: {user_prompt}"
         ))
 
+        self._dispatch_hook("BEFORE_DELIVERY", {"user_prompt": user_prompt, "context": curr_ctx})
         pipeline_start_time = time.time()
+
+        stage_hook_map = {
+            "IntentResolverStage": ("BEFORE_INTENT", "AFTER_INTENT"),
+            "ReasoningEngineStage": ("BEFORE_REASONING", "AFTER_REASONING"),
+            "TruthEngineStage": ("BEFORE_TRUTH", "AFTER_TRUTH"),
+            "QualityEngineStage": ("BEFORE_QUALITY", "AFTER_QUALITY"),
+            "ModelGatewayStage": ("BEFORE_GENERATION", "AFTER_GENERATION"),
+        }
 
         for stage in self.stages:
             self.tracer.save_checkpoint(stage.name, curr_ctx)
@@ -405,6 +433,10 @@ class RuntimeOrchestrator:
                 stage_name=stage.name,
                 message=f"Executing stage {stage.name}"
             ))
+
+            before_hook, after_hook = stage_hook_map.get(stage.name, (None, None))
+            if before_hook:
+                self._dispatch_hook(before_hook, {"stage": stage.name, "context": curr_ctx})
 
             result = stage.execute(curr_ctx, self.tracer)
 
@@ -425,6 +457,9 @@ class RuntimeOrchestrator:
                 return rollback_ctx
 
             curr_ctx = result.context
+            if after_hook:
+                self._dispatch_hook(after_hook, {"stage": stage.name, "context": curr_ctx})
+
             self.event_bus.publish(PipelineEvent(
                 event_type="STAGE_SUCCESS",
                 stage_name=stage.name,
@@ -434,6 +469,8 @@ class RuntimeOrchestrator:
         total_duration = (time.time() - pipeline_start_time) * 1000.0
         self.tracer.record_metric("TotalPipelineDuration", total_duration)
 
+        self._dispatch_hook("AFTER_DELIVERY", {"context": curr_ctx, "duration_ms": total_duration})
+
         self.event_bus.publish(PipelineEvent(
             event_type="PIPELINE_COMPLETE",
             stage_name="Orchestrator",
@@ -441,3 +478,4 @@ class RuntimeOrchestrator:
         ))
 
         return curr_ctx
+

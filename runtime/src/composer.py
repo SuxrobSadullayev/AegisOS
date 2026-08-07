@@ -3,11 +3,12 @@ Modul 6: PromptComposer & Token Windowing
 Combines Layer 0 Core files, Layer 1 Domain Modules, and Engine Pipeline Traces into a structured System Prompt Payload.
 """
 
-from typing import Dict
+from typing import Dict, List, Optional
 from runtime.src.config import AegisConfig
 from runtime.src.loaders import KernelLoader, KnowledgeLoader
 from runtime.src.resolver import ResolvedContext
 from runtime.src.pipeline import EnginePipelineTrace
+from runtime.src.plugin import PluginPromptContribution
 
 
 class PromptComposer:
@@ -16,10 +17,15 @@ class PromptComposer:
         self.kernel_loader = KernelLoader(config)
         self.knowledge_loader = KnowledgeLoader(config)
 
-    def compose(self, resolved_ctx: ResolvedContext, trace: EnginePipelineTrace) -> str:
+    def compose(
+        self,
+        resolved_ctx: ResolvedContext,
+        trace: EnginePipelineTrace,
+        plugin_contributions: Optional[List[PluginPromptContribution]] = None,
+    ) -> str:
         parts = []
 
-        # 1. Layer 0 Core Kernel
+        # 1. Layer 0 Core Kernel (ALWAYS FIRST - Absolute Priority, Plugins cannot override)
         core_files = self.kernel_loader.load_core_files()
         parts.append("# LAYER 0: AEGIS KERNEL CONTEXT\n")
         for rel_path, content in core_files.items():
@@ -40,4 +46,13 @@ class PromptComposer:
                 if mod_content:
                     parts.append(f"<!-- Module: {mod_path} -->\n{mod_content}\n")
 
+        # 4. Layer 2 Plugin Prompt Contributions
+        if plugin_contributions:
+            parts.append("\n# LAYER 2: PLUGIN EXTENSIONS\n")
+            # Sort by priority (higher priority first)
+            sorted_contribs = sorted(plugin_contributions, key=lambda c: c.priority)
+            for contrib in sorted_contribs:
+                parts.append(f"<!-- Plugin: {contrib.plugin_id} ({contrib.section}) -->\n{contrib.content}\n")
+
         return "\n".join(parts)
+

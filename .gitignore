@@ -1,6 +1,7 @@
-__pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.swp
 .DS_Store
 runtime/sessions/*.json
+

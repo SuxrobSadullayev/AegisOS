@@ -95,3 +95,33 @@ class EpistemicGraphStore:
                     stack.extend(self.reverse_edges.get(downstream_id, set()))
 
         return affected
+
+    def create_plugin_claim(
+        self,
+        plugin_id: str,
+        statement: str,
+        requested_state: EpistemicState = EpistemicState.HYPOTHESIS,
+        evidence_level: EvidenceLevel = EvidenceLevel.LEVEL_0_UNSUBSTANTIATED,
+        depends_on: Optional[List[str]] = None,
+        evidence_refs: Optional[List[str]] = None,
+    ) -> ClaimObject:
+        """Enforces Truth Engine rule: Plugins CANNOT self-declare claims as VERIFIED_FACT
+        without sufficient evidence (EvidenceLevel >= LEVEL_4_SPECIFICATION).
+        """
+        effective_state = requested_state
+        if requested_state == EpistemicState.VERIFIED_FACT:
+            if evidence_level.value < EvidenceLevel.LEVEL_4_SPECIFICATION.value:
+                effective_state = EpistemicState.HYPOTHESIS
+
+        refs = list(evidence_refs or [])
+        refs.append(f"plugin:{plugin_id}")
+
+        claim = self.create_claim(
+            statement=statement,
+            state=effective_state,
+            evidence_level=evidence_level,
+            depends_on=depends_on,
+        )
+        claim.evidence_refs = refs
+        return claim
+

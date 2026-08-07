@@ -1,0 +1,25 @@
+plugin_id: "aegis.capability.python"
+name: "Aegis Python Code Capability Plugin"
+version: "1.0.0"
+description: "Provides Python language capabilities, code standards validation, and AST safety analysis for Aegis."
+author: "Aegis OS Team"
+publisher: "Aegis Core"
+license: "MIT"
+aegis_compatibility: ">=2.0.0"
+python_compatibility: ">=3.12"
+entry_point: "plugin.py"
+priority: 10
+sandbox_level: "BASIC"
+capabilities:
+  - PIPELINE_STAGE
+  - QUALITY_VALIDATOR
+  - PROMPT_TRANSFORMER
+permissions:
+  - FILESYSTEM_READ
+  - PIPELINE_MODIFY
+hooks:
+  - BEFORE_INTENT
+  - BEFORE_QUALITY
+config:
+  enforce_type_hints: true
+  max_complexity: 10

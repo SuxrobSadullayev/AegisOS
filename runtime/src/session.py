@@ -274,6 +274,16 @@ class SessionManager:
         self._sessions: Dict[str, SessionContext] = {}
         self._snapshots_count = 0
         self._restore_times: List[float] = []
+        self._on_session_create_hooks: List[Callable[[SessionContext], None]] = []
+        self._on_session_destroy_hooks: List[Callable[[SessionContext], None]] = []
+
+    def register_session_hook(self, hook_type: str, callback: Callable[[SessionContext], None]) -> None:
+        """Plugins can register session lifecycle hooks."""
+        with self._lock:
+            if hook_type.upper() in ("ON_SESSION_CREATE", "BEFORE_SESSION"):
+                self._on_session_create_hooks.append(callback)
+            elif hook_type.upper() in ("ON_SESSION_DESTROY", "AFTER_SESSION"):
+                self._on_session_destroy_hooks.append(callback)
 
     def create_session(self, user_id: str, session_id: Optional[str] = None) -> SessionContext:
         with self._lock:
@@ -286,9 +296,39 @@ class SessionManager:
             self._sessions[sid] = context
             self.persistence.save_snapshot(context)
             self._snapshots_count += 1
+
+            for hook in self._on_session_create_hooks:
+                try:
+                    hook(context)
+                except Exception:
+                    pass
+
             return context
 
+    def set_plugin_memory(self, session_id: str, plugin_id: str, key: str, value: Any, token: Optional[Any] = None) -> bool:
+        """Modifies session key-value memory on behalf of a plugin.
+        Default DENY: Requires explicit MEMORY_WRITE permission on token.
+        """
+        with self._lock:
+            sess = self.get_session(session_id)
+            if not sess:
+                raise ValueError(f"Session '{session_id}' not found.")
+
+            # Check explicit permission
+            if token is None or not hasattr(token, "has_permission"):
+                raise PermissionError(f"Plugin '{plugin_id}' lacks explicit MEMORY_WRITE permission for session storage.")
+
+            # Look up MEMORY_WRITE enum
+            from runtime.src.plugin import PluginPermission
+            if not token.has_permission(PluginPermission.MEMORY_WRITE):
+                raise PermissionError(f"Plugin '{plugin_id}' lacks explicit MEMORY_WRITE permission for session storage.")
+
+            sess.memory.key_value_memory[f"plugin:{plugin_id}:{key}"] = value
+            self.persistence.save_snapshot(sess)
+            return True
+
     def get_session(self, session_id: str) -> Optional[SessionContext]:
+
         with self._lock:
             # Check in-memory cache
             if session_id in self._sessions:
@@ -344,8 +384,14 @@ class SessionManager:
             if sess:
                 sess.state = SessionState.TERMINATED
                 self.persistence.save_snapshot(sess)
+                for hook in self._on_session_destroy_hooks:
+                    try:
+                        hook(sess)
+                    except Exception:
+                        pass
                 return True
             return False
+
 
     def get_metrics(self) -> SessionMetrics:
         with self._lock:
