@@ -1,116 +1,217 @@
 <div align="center">
 
-# 🛡️ Aegis AI Framework
+# 🛡️ Aegis AI Operating System
 
-**Upgrade the reasoning quality of any LLM-based coding agent.**
+**Extensible, AI-Native Runtime Engine & Reasoning Framework for Coding Agents**
 
-*Structured context · Engineering workflows · Quality gates · Modular prompts*
+*Deterministic Pipeline · AI-Native Plugin Architecture · Epistemic Truth Verification · Quality Gates · Multi-Turn Persistence*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0--alpha-orange.svg)](CHANGELOG.md)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Version](https://img.shields.io/badge/version-2.0.0--production-green.svg)](CHANGELOG.md)
+[![Build Status](https://img.shields.io/badge/tests-159%20passed-brightgreen.svg)](runtime/tests/)
 
 </div>
 
 ---
 
-## What is Aegis?
+## 📖 What is Aegis AI OS?
 
-Aegis is an **agent-agnostic AI engineering framework** that improves how LLM-based coding agents reason, plan, code, debug, and review — without modifying model weights.
-
----
-
-## Architecture (7 Frozen Layers)
-
-```
-aegis/
-├── core/                    # Layer 0: Immutable Foundation (Kernel, Engines, Workflow, Contracts)
-├── modules/                 # Layer 1: Prescriptive Domain Modules & Standards
-├── knowledge/               # Layer 1: Descriptive Knowledge Base & Patterns
-├── runtime/                 # Layer 2: Context Execution Pipeline (Loaders, Resolvers, Generators, Adapters)
-├── evaluation/              # Layer 3: Objective Metrics & Benchmarks
-├── tools/                   # Layer 3: Framework Development & Validation Tools
-└── examples/                # Layer 4: End-to-End Demonstrations & Integrations
-```
-
-### Execution Pipeline
-
-```
-Knowledge Layer (core/, modules/, knowledge/)
-       │
-       ▼
-Runtime Loader (runtime/loaders/)
-       │
-       ▼
-Module Resolver (runtime/resolvers/)
-       │
-       ▼
-Prompt Generator (runtime/generators/)
-       │
-       ▼
-Adapter Transformer (runtime/adapters/)
-       │
-       ▼
-Target AI Agent (Claude, Gemini, GPT, Cursor, Windsurf, Codex, Kiro, Qwen)
-```
+Aegis is an **extensible, production-grade AI Operating System and Reasoning Framework** designed to enhance the reasoning depth, architectural safety, and execution accuracy of LLM-based coding agents without modifying underlying model weights.
 
 ---
 
-## Supported Agents
+## 🏛️ System Architecture
 
-- Claude Code / Claude Desktop (`runtime/adapters/claude/`)
-- Gemini CLI / Gemini App (`runtime/adapters/gemini/`)
-- Cursor (`runtime/adapters/cursor/`)
-- Windsurf (`runtime/adapters/windsurf/`)
-- OpenAI Codex / ChatGPT (`runtime/adapters/codex/`)
-- Kiro (`runtime/adapters/kiro/`)
-- Qwen Code (`runtime/adapters/qwen/`)
-- Generic / Future LLM Agents (`runtime/adapters/generic/`)
+```
+                                USER REQUEST
+                                     │
+                                     ▼
+                               CLI (`./aegis`)
+                                     │
+                                     ▼
+                            Session Manager (Multi-Turn)
+                                     │
+                                     ▼
+                            Intent Resolver Stage
+                                     │
+                                     ▼
+                            Task Planner Stage
+                                     │
+                                     ▼
+                            Knowledge Loader Stage
+                                     │
+                                     ▼
+                            Reasoning Engine Stage
+                                     │
+                                     ▼
+                            Truth Engine Stage (Claim DAG)
+                                     │
+                                     ▼
+                            Plugin Hooks & Capabilities
+                                     │
+                                     ▼
+                            Prompt Composer Stage (Layer 0 Kernel)
+                                     │
+                                     ▼
+                            Model Gateway Stage (Provider Router)
+                                     │
+                                     ▼
+                            Quality Engine Stage (12 Gates)
+                                     │
+                                     ▼
+                            Auto Repair Stage (Max 3 Retries)
+                                     │
+                                     ▼
+                            Session Persistence & Checkpoint
+                                     │
+                                     ▼
+                               FINAL RESPONSE
+```
 
 ---
 
-## Aegis Plugin Architecture Subsystem v2.0.0
+## 🚀 CLI Usage & Executable Guide
 
-Aegis includes an AI-native Plugin Architecture Subsystem that transforms Aegis into an extensible AI Operating System.
-
-### Key Capabilities
-
-- **AI-Native Capability Registry**: Dynamic registration for `commands`, `validators`, `reasoners`, `quality_rules`, `knowledge_modules`, `prompts`, `templates`, `agents`, `tools`, `model_providers`.
-- **Deterministic Dependency Graph**: Kahn's topological sort algorithm with circular dependency detection and SemVer constraint matching.
-- **Transactional Hot Reload**: Atomic instance swap preserving execution state without corruption.
-- **Pipeline Hook Dispatcher**: 12+ extension hooks across the 10-stage execution pipeline (`before_intent`, `after_intent`, `before_reasoning`, `after_reasoning`, `before_truth`, `after_truth`, `before_quality`, `after_quality`, `before_generation`, `after_generation`, `before_delivery`, `after_delivery`).
-- **Default DENY Security & Capabilities**: Capability tokens with explicit permission checks (`FILESYSTEM_READ`, `FILESYSTEM_WRITE`, `NETWORK_OUTBOUND`, `SECRET_ACCESS`, `PIPELINE_MODIFY`, `MEMORY_WRITE`, etc.).
-- **Kernel Priority**: Layer 0 Kernel context always maintains top priority over plugin prompt contributions.
-
-### Aegis Plugin SDK CLI Commands
+Aegis provides a command-line executable (`./aegis`) for task execution, multi-turn session persistence, and plugin management:
 
 ```bash
-# Create a new plugin template
-python3 -m runtime.src.cli plugin create <plugin_name>
+# Execute a single task prompt with mock provider
+./aegis --task "Review Python backend security architecture"
 
-# Validate plugin manifest schema and compatibility
-python3 -m runtime.src.cli plugin validate <plugin_path>
+# Execute task with verbose pipeline event tracking
+./aegis --task "Design database schema for auth service" --verbose
 
-# Run plugin isolation unit test harness
-python3 -m runtime.src.cli plugin test <plugin_path>
+# Specify target LLM provider (mock, gemini, claude, openai, openrouter)
+./aegis --task "Optimize C++ memory pool" --provider gemini
 
-# Package plugin into .aegis-plugin.zip archive
-python3 -m runtime.src.cli plugin package <plugin_path>
+# Multi-turn session execution (preserves context across consecutive turns)
+./aegis --task "Turn 1: Create Python backend project" --session SESS_DEV_001
+./aegis --task "Turn 2: Add OAuth2 authentication" --session SESS_DEV_001
 
-# List all discovered plugins and their states
-python3 -m runtime.src.cli plugin list
+# List all active and persistent session snapshots
+./aegis --list-sessions
 
-# View detailed plugin metadata and capabilities
-python3 -m runtime.src.cli plugin info <plugin_id>
+# Plugin Management Shorthands
+./aegis --plugins
+./aegis --plugin-info aegis.capability.python
 
-# Enable / Disable plugins dynamically
-python3 -m runtime.src.cli plugin enable <plugin_id>
-python3 -m runtime.src.cli plugin disable <plugin_id>
+# Aegis Executable Version & Help
+./aegis --version
+./aegis --help
 ```
 
 ---
 
-## License
+## 🔌 AI-Native Plugin Subsystem (v2.0.0)
 
-[MIT](LICENSE) — free to use, modify, and distribute.
+Aegis features an **extensible Plugin Operating System Architecture**:
 
+- **AI-Native Capability Registry**: Dynamic registration for `commands`, `validators`, `reasoners`, `quality_rules`, `knowledge_modules`, `prompts`, `templates`, `agents`, `tools`, `model_providers`.
+- **Kahn DAG Dependency Resolution**: Topological sort with circular dependency detection and SemVer constraint matching.
+- **12+ Pipeline Extension Hooks**: Hook execution at key pipeline stages (`before_intent`, `after_intent`, `before_reasoning`, `after_reasoning`, `before_truth`, `after_truth`, `before_quality`, `after_quality`, `before_generation`, `after_generation`, `before_delivery`, `after_delivery`).
+- **Default DENY Security & Capability Tokens**: Explicit permissions required (`FILESYSTEM_READ`, `FILESYSTEM_WRITE`, `NETWORK_OUTBOUND`, `SECRET_ACCESS`, `PIPELINE_MODIFY`, `MEMORY_WRITE`, `PROCESS_EXECUTE`, `RUNTIME_MODIFY`).
+- **Transactional Hot Reload**: Atomic instance swap preserving execution state without corruption.
+- **Layer 0 Kernel Priority**: Immutable Kernel rules take precedence over plugin prompt contributions.
+
+### Aegis Plugin SDK Commands
+
+```bash
+# Create a new plugin scaffolding template
+./aegis plugin create <plugin_name>
+
+# Validate manifest schema and version compatibility
+./aegis plugin validate <plugin_path>
+
+# Run plugin isolation unit test harness
+./aegis plugin test <plugin_path>
+
+# Bundle plugin into a .aegis-plugin.zip package
+./aegis plugin package <plugin_path>
+
+# List all discovered plugins and their states
+./aegis plugin list
+
+# Inspect detailed plugin metadata and capabilities
+./aegis plugin info <plugin_id>
+
+# Dynamically enable or disable plugins
+./aegis plugin enable <plugin_id>
+./aegis plugin disable <plugin_id>
+```
+
+---
+
+## 🧠 Core Engines & Subsystems
+
+### 1. Truth Engine (`runtime/src/epistemic.py`)
+- Epistemic claim graph DAG supporting states: `UNKNOWN`, `HYPOTHESIS`, `INFERENCE`, `VERIFIED_FACT`, `INVALIDATED`, `SUSPECT`.
+- **Level 0–5 Evidence Hierarchy**: Claims cannot transition to `VERIFIED_FACT` without Level 4 (Specification) or Level 5 (Execution) evidence.
+- Automatic **Cascade Invalidation**: Invalidating an upstream claim automatically marks downstream dependent claims as `SUSPECT`.
+
+### 2. Reasoning Engine (`runtime/src/reasoning.py`)
+- Dynamic strategy registry allowing custom reasoning algorithms.
+- Enforces depth controls (`L1_FAST`, `L2_STANDARD`, `L3_DEEP`).
+
+### 3. Quality Engine & Auto Repair (`runtime/src/quality.py`)
+- 12 deterministic validation gates: Hallucination, Prompt Injection Residue, Formatting, Incomplete Answer, Low Confidence, Architecture Violation, Contract Violation, Secret Leakage, etc.
+- **Automated Auto-Repair Loop**: Hardened to a maximum retry limit of 3. Gracefully halts and saves session trace if repair fails.
+
+### 4. Session & Memory Manager (`runtime/src/session.py`)
+- Multi-turn conversation history tracking, token window pruning, and crash-resilient disk snapshots (`runtime/sessions/`).
+- Permission-gated memory access requiring explicit `MEMORY_WRITE` token permissions.
+
+---
+
+## 🧪 Testing & Validation
+
+Run the complete test suite (159 tests passing):
+
+```bash
+# Execute unit and integration tests
+python3 -m unittest discover -s runtime/tests -p "test_*.py"
+
+# Run Aegis Module Contract Validator
+./tools/validators/validate-modules.sh
+
+# Run Aegis Markdown Linter
+./tools/linters/lint-markdown.sh
+
+# Run Aegis Plugin Architecture Demo
+python3 -m runtime.examples.plugin_demo
+```
+
+---
+
+## 📂 Directory Structure
+
+```
+Aegis AI Framework/
+├── aegis                      # Main CLI Executable script
+├── core/                      # Layer 0: Core Foundation & Contracts
+├── modules/                   # Layer 1: Domain Modules & Standards
+├── plugins/                   # Registered Aegis Plugins
+│   ├── python_capability_plugin/
+│   └── security_capability_plugin/
+├── runtime/
+│   ├── src/                   # Aegis Runtime Kernel Subsystems
+│   │   ├── cli.py             # CLI Entrypoint & Plugin SDK CLI
+│   │   ├── composer.py        # PromptComposer & Layer 0 Enforcer
+│   │   ├── config.py          # ConfigManager & Core Types
+│   │   ├── epistemic.py       # Epistemic Graph Store (Truth Engine)
+│   │   ├── gateway.py         # Model Gateway & Provider Router
+│   │   ├── knowledge.py       # Knowledge Loader Subsystem
+│   │   ├── orchestrator.py    # RuntimeOrchestrator Machine
+│   │   ├── plugin.py          # Plugin Architecture Subsystem v2.0.0
+│   │   ├── quality.py         # Quality Engine & Auto Repair
+│   │   ├── reasoning.py       # Reasoning Engine Subsystem
+│   │   └── session.py         # Session & Memory Manager
+│   ├── tests/                 # Test Suite (159 Unit & Integration Tests)
+│   └── examples/              # Subsystem Demos & Examples
+└── tools/                     # Code Validators and Linters
+```
+
+---
+
+## 📄 License
+
+[MIT License](LICENSE) — free to use, modify, and distribute.

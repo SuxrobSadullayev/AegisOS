@@ -22,6 +22,7 @@ class PromptComposer:
         resolved_ctx: ResolvedContext,
         trace: EnginePipelineTrace,
         plugin_contributions: Optional[List[PluginPromptContribution]] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         parts = []
 
@@ -54,5 +55,12 @@ class PromptComposer:
             for contrib in sorted_contribs:
                 parts.append(f"<!-- Plugin: {contrib.plugin_id} ({contrib.section}) -->\n{contrib.content}\n")
 
-        return "\n".join(parts)
+        # 5. Multi-Turn Session Conversation History
+        if conversation_history:
+            parts.append("\n# CONVERSATION HISTORY (MULTI-TURN SESSION)\n")
+            for msg in conversation_history:
+                role = msg.get("role", "user").upper()
+                content = msg.get("content", "")
+                parts.append(f"[{role}]: {content}\n")
 
+        return "\n".join(parts)

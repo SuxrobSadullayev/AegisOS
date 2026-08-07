@@ -180,11 +180,16 @@ def main():
     disable_p = plugin_subparsers.add_parser("disable", help="Pluginni o'chirish")
     disable_p.add_argument("name", help="Plugin ID")
 
-    # Optional top-level arguments for direct execution
+    # Top-level arguments
     parser.add_argument("--task", "-t", help="Task description or prompt for Aegis")
+    parser.add_argument("--session", "-s", help="Target session ID for multi-turn execution")
+    parser.add_argument("--list-sessions", action="store_true", help="List all active and persistent sessions")
+    parser.add_argument("--plugins", action="store_true", help="List all discovered plugins")
+    parser.add_argument("--plugin-info", help="Get detailed information for a plugin")
     parser.add_argument("--provider", "-p", default="mock", help="Target LLM provider (mock, gemini, claude, openai, openrouter)")
     parser.add_argument("--model", "-m", help="Override target LLM model")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose pipeline event logging")
+    parser.add_argument("--version", action="version", version="Aegis AI OS Executable Runtime Engine v2.0.0")
 
     args = parser.parse_args()
 
@@ -194,6 +199,39 @@ def main():
         handle_plugin_cli(args, config)
         return
 
+    # Handle shorthand top-level flags
+    if args.plugins:
+        args.plugin_command = "list"
+        handle_plugin_cli(args, config)
+        return
+
+    if args.plugin_info:
+        args.plugin_command = "info"
+        args.name = args.plugin_info
+        handle_plugin_cli(args, config)
+        return
+
+    plugins_dir = os.path.join(config.base_dir, "plugins")
+    plugin_manager = PluginManager(plugins_dir)
+    plugin_manager.discover_plugins()
+
+    provider = ModelGatewayFactory.get_provider(args.provider, config)
+    orchestrator = RuntimeOrchestrator(config, provider, plugin_manager=plugin_manager)
+
+    if args.list_sessions:
+        print("📋 Aegis Session Persistence List:")
+        sessions_dir = os.path.join(config.base_dir, "runtime", "sessions")
+        if os.path.exists(sessions_dir):
+            files = [f for f in os.listdir(sessions_dir) if f.endswith(".json")]
+            if files:
+                for f in sorted(files):
+                    print(f"  - Session Snapshot: {f.replace('.json', '')}")
+            else:
+                print("  (No persistent session snapshots found)")
+        else:
+            print("  (No persistent session directory found)")
+        return
+
     if not args.task:
         parser.print_help()
         sys.exit(0)
@@ -201,22 +239,16 @@ def main():
     if args.model:
         config.gemini_model = args.model
 
-    provider = ModelGatewayFactory.get_provider(args.provider, config)
-    plugins_dir = os.path.join(config.base_dir, "plugins")
-    plugin_manager = PluginManager(plugins_dir)
-    plugin_manager.discover_plugins()
-
-    orchestrator = RuntimeOrchestrator(config, provider, plugin_manager=plugin_manager)
-
     if args.verbose:
         def log_event(evt: PipelineEvent):
-            print(f"[{evt.event_type}] Stage: {evt.stage_name} — {evt.message}")
+            print(f"[{evt.event_type:18s}] Stage: {evt.stage_name:22s} — {evt.message}")
         orchestrator.event_bus.subscribe(log_event)
 
-    print(f"🛡️ Aegis AI OS Executable Runtime Engine v2.0.0 [Provider: {args.provider.upper()}]")
+    session_str = f" [Session: {args.session}]" if args.session else ""
+    print(f"🛡️ Aegis AI OS Executable Runtime Engine v2.0.0 [Provider: {args.provider.upper()}]{session_str}")
     print(f"Task: {args.task}\n")
 
-    final_ctx = orchestrator.run(args.task)
+    final_ctx = orchestrator.run(args.task, session_id=args.session)
 
     if final_ctx.quality_result and final_ctx.quality_result.status.value != "PASS":
         print(f"❌ Execution halted: Failed Quality Gates: {', '.join(final_ctx.quality_result.failed_gates)}", file=sys.stderr)
@@ -230,6 +262,7 @@ def main():
     if final_ctx.model_response:
         print(final_ctx.model_response.text)
     print("================================================================================")
+
 
 
 if __name__ == "__main__":

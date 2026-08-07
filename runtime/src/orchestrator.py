@@ -51,6 +51,8 @@ class OrchestratorContext:
     model_response: Optional[ModelResponse] = None
     quality_result: Optional[QualityValidationResult] = None
     repair_attempts: int = 0
+    session_id: Optional[str] = None
+    conversation_history: List[Dict[str, str]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def copy_with(self, **changes) -> "OrchestratorContext":
@@ -64,10 +66,13 @@ class OrchestratorContext:
             "model_response": self.model_response,
             "quality_result": self.quality_result,
             "repair_attempts": self.repair_attempts,
+            "session_id": self.session_id,
+            "conversation_history": list(self.conversation_history),
             "metadata": dict(self.metadata),
         }
         current_data.update(changes)
         return OrchestratorContext(**current_data)
+
 
 
 @dataclass
@@ -257,8 +262,11 @@ class PromptComposerStage(PipelineStage):
         )
 
         contribs = self.plugin_manager.get_prompt_contributions() if self.plugin_manager else None
-        composed_prompt = composer.compose(resolved_ctx, trace, plugin_contributions=contribs)
+        composed_prompt = composer.compose(
+            resolved_ctx, trace, plugin_contributions=contribs, conversation_history=context.conversation_history
+        )
         new_ctx = context.copy_with(composed_prompt=composed_prompt)
+
         duration = (time.time() - start_time) * 1000.0
         tracer.record_metric(self.name, duration)
         return StageResult(success=True, context=new_ctx)
@@ -355,7 +363,7 @@ class AutoRepairStage(PipelineStage):
 
 
 class RuntimeOrchestrator:
-    """Central Aegis Runtime Orchestrator Machine with Plugin System Integration."""
+    """Central Aegis Runtime Orchestrator Machine with Plugin System and Session Persistence Integration."""
 
     def __init__(
         self,
@@ -367,6 +375,8 @@ class RuntimeOrchestrator:
         self.event_bus = PipelineEventBus()
         self.tracer = PipelineTracer()
         self.graph_store = EpistemicGraphStore()
+        from runtime.src.session import SessionManager
+        self.session_manager = SessionManager(config)
         self.provider = model_provider or ModelGatewayFactory.get_provider("mock", config)
         self.plugin_manager = plugin_manager
         self.stages: List[PipelineStage] = []
@@ -404,9 +414,24 @@ class RuntimeOrchestrator:
             hook_enum = PluginHook(hook_name)
             self.plugin_manager.dispatch_hook(hook_enum, payload, fail_safe=True)
 
-    def run(self, user_prompt: str) -> OrchestratorContext:
-        """Executes the complete Aegis pipeline with rollback, event tracking, and plugin hooks."""
-        initial_ctx = OrchestratorContext(user_prompt=user_prompt, config=self.config)
+    def run(self, user_prompt: str, session_id: Optional[str] = None) -> OrchestratorContext:
+        """Executes the complete Aegis pipeline with rollback, event tracking, session persistence, and plugin hooks."""
+        active_sess_id = session_id
+        history: List[Dict[str, str]] = []
+
+        if active_sess_id:
+            sess = self.session_manager.get_session(active_sess_id) or self.session_manager.create_session("default_user", active_sess_id)
+            active_sess_id = sess.session_id
+            # Record user prompt in history
+            self.session_manager.add_user_message(active_sess_id, user_prompt)
+            history = [m.to_dict() for m in sess.history.messages[:-1]]
+
+        initial_ctx = OrchestratorContext(
+            user_prompt=user_prompt,
+            config=self.config,
+            session_id=active_sess_id,
+            conversation_history=history,
+        )
         curr_ctx = initial_ctx
 
         self.event_bus.publish(PipelineEvent(
@@ -438,7 +463,12 @@ class RuntimeOrchestrator:
             if before_hook:
                 self._dispatch_hook(before_hook, {"stage": stage.name, "context": curr_ctx})
 
-            result = stage.execute(curr_ctx, self.tracer)
+            # Stage execution with exception protection & rollback
+            try:
+                result = stage.execute(curr_ctx, self.tracer)
+            except Exception as exc:
+                logger.error(f"Unhandled exception in stage '{stage.name}': {exc}")
+                result = StageResult(success=False, context=curr_ctx, error_message=str(exc))
 
             if not result.success:
                 self.event_bus.publish(PipelineEvent(
@@ -449,12 +479,16 @@ class RuntimeOrchestrator:
 
                 # Rollback to checkpoint
                 rollback_ctx = self.tracer.get_checkpoint(stage.name) or curr_ctx
+                total_duration = (time.time() - pipeline_start_time) * 1000.0
+                self.tracer.record_metric("TotalPipelineDuration", total_duration)
+
                 self.event_bus.publish(PipelineEvent(
                     event_type="ROLLBACK",
                     stage_name=stage.name,
                     message=f"Rollback executed to checkpoint of stage {stage.name}"
                 ))
                 return rollback_ctx
+
 
             curr_ctx = result.context
             if after_hook:
@@ -469,6 +503,10 @@ class RuntimeOrchestrator:
         total_duration = (time.time() - pipeline_start_time) * 1000.0
         self.tracer.record_metric("TotalPipelineDuration", total_duration)
 
+        # Save assistant response to session persistence if session active
+        if active_sess_id and curr_ctx.model_response:
+            self.session_manager.add_assistant_message(active_sess_id, curr_ctx.model_response.text)
+
         self._dispatch_hook("AFTER_DELIVERY", {"context": curr_ctx, "duration_ms": total_duration})
 
         self.event_bus.publish(PipelineEvent(
@@ -478,4 +516,3 @@ class RuntimeOrchestrator:
         ))
 
         return curr_ctx
-
