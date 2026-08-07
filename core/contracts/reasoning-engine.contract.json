@@ -1,0 +1,46 @@
+{
+  "$schema": "https://aegis.dev/schemas/kernel-contract.v1.json",
+  "component": "core.engines.reasoning_engine",
+  "version": "1.0.0",
+  "classification": "Layer 0 Kernel Subsystem",
+  "purpose": "Deterministik 9 bosqichli fikrlash va moslashuvchan chuqurlik (L1/L2/L3) boshqaruvi",
+  "responsibilities": [
+    "Vazifa murakkabligiga ko'ra fikrlash chuqurligini (L1/L2/L3) belgilash",
+    "Kod yozishdan oldin majburiy parchalash va xavf tahlilini majburlash",
+    "Truth Engine bilan ClaimID havola zanjirini o'rnatishtirish",
+    "Ishonch darajasini (Confidence Score) hisoblash va 0.70 chegarasini majburlash"
+  ],
+  "inputs": {
+    "task_context": "TaskContextObject",
+    "epistemic_graph": "ClaimGraphState"
+  },
+  "outputs": {
+    "reasoning_trace": "ReasoningTraceObject",
+    "confidence_score": "float",
+    "selected_depth": "Enum<L1, L2, L3>"
+  },
+  "state": {
+    "is_stateful": true,
+    "persistence": "Session Reasoning Trace Memory"
+  },
+  "dependencies": [
+    "core.kernel.constitution",
+    "core.engines.truth_engine"
+  ],
+  "consumers": [
+    "core.engines.quality_engine",
+    "core.workflow.workflow",
+    "runtime.resolvers",
+    "runtime.generators"
+  ],
+  "guarantees": {
+    "reasoning_before_action": "Analiz bajarilmasdan turib kod generatsiyasi boshlanmaydi",
+    "confidence_gate": "Ishonch darajasi 0.70 dan past bo'lganda ijro bloklanadi",
+    "truth_binding": "L2/L3 fikrlashdagi har bir taxmin ClaimID ga biriktiriladi"
+  },
+  "failure_modes": [
+    "LOW_CONFIDENCE: Ishonch darajasi 0.70 dan past",
+    "UNBOUND_ASSUMPTION: Taxmin Truth Engine ClaimID ga biriktirilmagan",
+    "DEPTH_MISMATCH: Vazifa murakkabligiga mos kelmaydigan chuqurlik tanlangan"
+  ]
+}
