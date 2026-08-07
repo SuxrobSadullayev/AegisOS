@@ -8,7 +8,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-2.1.0--production-green.svg)](CHANGELOG.md)
-[![Build Status](https://img.shields.io/badge/tests-269%20passed-brightgreen.svg)](runtime/tests/)
+[![Build Status](https://img.shields.io/badge/tests-343%20passed-brightgreen.svg)](runtime/tests/)
+
 
 
 
@@ -197,6 +198,57 @@ python3 runtime/examples/sandbox_demo.py
 ```
 
 ---
+
+## 📊 Production Observability, Audit & Telemetry Subsystem (`runtime/src/observability.py`)
+
+Aegis features a production-grade, zero-dependency **Observability, Security Audit & Telemetry Architecture**:
+
+```
+Aegis Core / Orchestrator / Subsystems / Plugins / Sandbox
+                           │
+                           ▼
+                 CorrelationContext (Thread-Local)
+                           │
+                           ▼
+                 ObservabilityManager (Facade)
+         ┌─────────────────┼─────────────────┐
+         ▼                 ▼                 ▼
+   TraceSpan Context   EventRedactor     MetricsCollector
+   (p50/p95/p99)     (Secret Masking)   (Latency/Counts)
+                           │
+                           ▼
+                  ObservabilityEventBus
+         ┌─────────────────┼─────────────────┐
+         ▼                 ▼                 ▼
+  ConsoleEventSink   FileEventSink     AuditEventSink
+  (Terminal Verbose) (runtime.jsonl)   (audit.jsonl)
+                     (Log Rotation)    (Append-Only)
+```
+
+- **Distributed-Style Tracing & Correlation**: Automatically correlates requests with `correlation_id`, `request_id`, `session_id`, `trace_id`, and parent-child `span_id` hierarchies across all 10 pipeline stages.
+- **Centralized Secret Redaction Barrier**: Centralized `EventRedactor` sanitizes Google API keys (`AIzaSy...`), OpenAI/Anthropic keys (`sk-...`), Bearer tokens, passwords, private keys, authorization headers, and nested dictionary metadata before logging. Zero secret leakage guaranteed!
+- **Immutable Security Audit Log (`runtime/logs/audit.jsonl`)**: Dedicated JSON Lines audit stream recording security events (`PERMISSION_DENIED`, `SANDBOX_VIOLATION`, `PATH_TRAVERSAL_BLOCKED`, `SECRET_ACCESS_DENIED`).
+- **Atomic File Log Rotation**: `FileEventSink` manages size-based log rotation (`runtime.jsonl.1`, `runtime.jsonl.2`) with configurable retention limits.
+- **Telemetry Latency Percentiles**: `MetricsCollector` calculates in-memory counters and exact latency percentiles (**p50**, **p95**, **p99**) for all pipeline stages and providers.
+- **Fail-Safe Guarantee (`NEVER CRASH RUNTIME`)**: Observability I/O failures, full disks, or permission errors are safely caught and isolated, guaranteeing main Aegis execution never crashes.
+
+### CLI Observability Commands
+
+```bash
+./aegis logs                         # View recent structured runtime event logs
+./aegis logs --tail 20 --category SECURITY
+./aegis logs --session SESS_DEV_001
+./aegis metrics                      # View telemetry metrics, counts, and p50/p95/p99 percentiles
+./aegis audit                        # View security audit event log stream
+```
+
+```bash
+# Run Observability & Audit Subsystem Demo
+python3 runtime/examples/observability_demo.py
+```
+
+---
+
 
 
 ## 🧠 Core Runtime Engines

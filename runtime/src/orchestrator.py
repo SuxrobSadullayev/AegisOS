@@ -426,6 +426,21 @@ class RuntimeOrchestrator:
             self.session_manager.add_user_message(active_sess_id, user_prompt)
             history = [m.to_dict() for m in sess.history.messages[:-1]]
 
+        from runtime.src.observability import ObservabilityManager, CorrelationContext, EventLevel, EventCategory, EventType
+        obs = ObservabilityManager.get_instance()
+        t_id = getattr(CorrelationContext._thread_local, "trace_id", None)
+        CorrelationContext.set_context(session_id=active_sess_id or "SESS_GLOBAL", trace_id=t_id)
+
+
+        obs.publish_event(
+            level=EventLevel.INFO,
+            category=EventCategory.PIPELINE,
+            event_type=EventType.REQUEST_STARTED,
+            component="RuntimeOrchestrator",
+            operation="run",
+            message=f"Starting Aegis pipeline for task: {user_prompt}"
+        )
+
         initial_ctx = OrchestratorContext(
             user_prompt=user_prompt,
             config=self.config,
@@ -442,6 +457,7 @@ class RuntimeOrchestrator:
 
         self._dispatch_hook("BEFORE_DELIVERY", {"user_prompt": user_prompt, "context": curr_ctx})
         pipeline_start_time = time.time()
+
 
         stage_hook_map = {
             "IntentResolverStage": ("BEFORE_INTENT", "AFTER_INTENT"),
@@ -465,7 +481,8 @@ class RuntimeOrchestrator:
 
             # Stage execution with exception protection & rollback
             try:
-                result = stage.execute(curr_ctx, self.tracer)
+                with obs.span(stage.name, "execute", EventCategory.PIPELINE):
+                    result = stage.execute(curr_ctx, self.tracer)
             except Exception as exc:
                 logger.error(f"Unhandled exception in stage '{stage.name}': {exc}")
                 result = StageResult(success=False, context=curr_ctx, error_message=str(exc))
@@ -476,6 +493,15 @@ class RuntimeOrchestrator:
                     stage_name=stage.name,
                     message=f"Stage {stage.name} failed: {result.error_message}"
                 ))
+                obs.publish_event(
+                    level=EventLevel.ERROR,
+                    category=EventCategory.PIPELINE,
+                    event_type=EventType.REQUEST_FAILED,
+                    component="RuntimeOrchestrator",
+                    operation="run",
+                    message=f"Pipeline request failed in stage {stage.name}: {result.error_message}",
+                    success=False
+                )
 
                 # Rollback to checkpoint
                 rollback_ctx = self.tracer.get_checkpoint(stage.name) or curr_ctx
@@ -488,7 +514,6 @@ class RuntimeOrchestrator:
                     message=f"Rollback executed to checkpoint of stage {stage.name}"
                 ))
                 return rollback_ctx
-
 
             curr_ctx = result.context
             if after_hook:
@@ -514,5 +539,15 @@ class RuntimeOrchestrator:
             stage_name="Orchestrator",
             message=f"Aegis pipeline completed in {total_duration:.2f}ms"
         ))
+        obs.publish_event(
+            level=EventLevel.INFO,
+            category=EventCategory.PIPELINE,
+            event_type=EventType.REQUEST_COMPLETED,
+            component="RuntimeOrchestrator",
+            operation="run",
+            message=f"Aegis pipeline request completed in {total_duration:.2f}ms",
+            duration_ms=total_duration,
+            success=True
+        )
 
         return curr_ctx

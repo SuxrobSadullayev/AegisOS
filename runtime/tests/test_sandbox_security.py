@@ -105,9 +105,9 @@ class TestSandboxSecurity(unittest.TestCase):
             payload={"path": "../../../etc/passwd"},
             plugin_id="plugin.path_traversal"
         )
-        resp = self.sandbox_mgr.send_request("plugin.path_traversal", req)
-        self.assertFalse(resp.success)
-        self.assertEqual(resp.error_code, "PATH_TRAVERSAL_DENIED")
+        with self.assertRaises(SandboxPermissionError):
+            self.sandbox_mgr.send_request("plugin.path_traversal", req)
+
 
     def test_security_7_secret_leakage_redacted(self):
         """7. Verifies environment secrets are redacted when env access is explicitly allowed."""

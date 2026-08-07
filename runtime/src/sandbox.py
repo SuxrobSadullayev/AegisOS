@@ -506,11 +506,24 @@ class SandboxManager:
         worker_thread.start()
         worker_thread.join(timeout=exec_timeout)
 
+        from runtime.src.observability import ObservabilityManager, EventLevel, EventCategory, EventType
+        obs = ObservabilityManager.get_instance()
+
         if worker_thread.is_alive():
             # Execution timed out! Terminate subprocess safely to protect main Aegis runtime.
             with self._lock:
                 self._statuses[plugin_id] = "TIMED_OUT"
                 self.terminate_worker(plugin_id)
+            obs.publish_event(
+                level=EventLevel.WARNING,
+                category=EventCategory.SECURITY,
+                event_type=EventType.SANDBOX_VIOLATION,
+                component="SandboxManager",
+                operation="send_request",
+                message=f"Sandbox execution timed out ({exec_timeout}s) for plugin '{plugin_id}'",
+                success=False,
+                metadata={"plugin_id": plugin_id, "request_id": request.request_id}
+            )
             raise SandboxTimeoutError(
                 f"Execution timed out ({exec_timeout}s) for plugin '{plugin_id}' request '{request.request_id}'"
             )
@@ -519,6 +532,16 @@ class SandboxManager:
             with self._lock:
                 self._statuses[plugin_id] = "CRASHED"
                 self.terminate_worker(plugin_id)
+            obs.publish_event(
+                level=EventLevel.ERROR,
+                category=EventCategory.SECURITY,
+                event_type=EventType.SANDBOX_VIOLATION,
+                component="SandboxManager",
+                operation="send_request",
+                message=f"Sandbox worker subprocess crashed for plugin '{plugin_id}': {exception_container[0]}",
+                success=False,
+                metadata={"plugin_id": plugin_id, "request_id": request.request_id}
+            )
             raise SandboxCrashedError(
                 f"Worker subprocess error for plugin '{plugin_id}': {exception_container[0]}"
             )
@@ -527,10 +550,22 @@ class SandboxManager:
         if resp is None:
             raise SandboxError(f"Empty IPC response from plugin '{plugin_id}' worker")
 
-        if not resp.success and resp.error_code == "PERMISSION_DENIED":
+        if not resp.success and resp.error_code in ("PERMISSION_DENIED", "PATH_TRAVERSAL_DENIED"):
+            evt_type = EventType.PATH_TRAVERSAL_BLOCKED if resp.error_code == "PATH_TRAVERSAL_DENIED" else EventType.PERMISSION_DENIED
+            obs.publish_event(
+                level=EventLevel.WARNING,
+                category=EventCategory.SECURITY,
+                event_type=evt_type,
+                component="SandboxManager",
+                operation="send_request",
+                message=f"Sandbox policy blocked request for plugin '{plugin_id}': {resp.error}",
+                success=False,
+                metadata={"plugin_id": plugin_id, "error_code": resp.error_code}
+            )
             raise SandboxPermissionError(resp.error or "Sandbox permission DENIED")
 
         return resp
+
 
     def terminate_worker(self, plugin_id: str) -> bool:
         """Gracefully terminates a worker subprocess, forcing kill if necessary."""

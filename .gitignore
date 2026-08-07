@@ -4,4 +4,4 @@
 *.swp
 .DS_Store
 runtime/sessions/*.json
-
+runtime/logs/*.jsonl

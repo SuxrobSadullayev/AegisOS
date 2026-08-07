@@ -362,6 +362,20 @@ def main():
     chat_p.add_argument("--model", "-m", help="Override target LLM model")
     chat_p.add_argument("--reasoning-depth", choices=["L1", "L2", "L3"], help="Set reasoning depth level")
 
+    # Observability subparsers
+    logs_p = subparsers.add_parser("logs", help="Aegis structured event loglarini ko'rish")
+    logs_p.add_argument("--tail", type=int, default=50, help="Ko'rsatiladigan so'nggi loglar soni (default: 50)")
+    logs_p.add_argument("--category", help="Kategoriya bo'yicha filter (PIPELINE, SECURITY, PLUGIN, SANDBOX, MODEL, SESSION)")
+    logs_p.add_argument("--session", help="Session ID bo'yicha filter")
+    logs_p.add_argument("--level", help="Level bo'yicha filter (INFO, WARNING, ERROR)")
+
+    subparsers.add_parser("metrics", help="Aegis runtime telemetry metrikalarini ko'rish")
+
+    audit_p = subparsers.add_parser("audit", help="Aegis security audit loglarini ko'rish")
+    audit_p.add_argument("--tail", type=int, default=50, help="Ko'rsatiladigan so'nggi audit hodisalari soni (default: 50)")
+    audit_p.add_argument("--session", help="Session ID bo'yicha filter")
+    audit_p.add_argument("--severity", help="Severity bo'yicha filter (WARNING, ERROR, CRITICAL)")
+
     # Plugins subcommand alias
     subparsers.add_parser("plugins", help="List all discovered plugins")
 
@@ -424,8 +438,43 @@ def main():
         config.max_tokens = args.max_tokens
     if args.verbose:
         config.verbose = True
+        from runtime.src.observability import ObservabilityManager
+        ObservabilityManager.get_instance().enable_console()
     if args.debug:
         config.debug_mode = True
+
+    if args.subcommand == "logs":
+        from runtime.src.observability import ObservabilityManager
+        obs = ObservabilityManager.get_instance()
+        logs = obs.read_logs(tail=args.tail, category=args.category, session_id=args.session, level=args.level)
+        print(f"📊 Aegis Event Loglari ({len(logs)} ta topildi):")
+        for entry in logs:
+            print(f"  [{entry.get('timestamp')}] [{entry.get('level')}] [{entry.get('category')}] {entry.get('component')}.{entry.get('operation')} — {entry.get('message')}")
+        return
+
+    if args.subcommand == "metrics":
+        from runtime.src.observability import ObservabilityManager
+        obs = ObservabilityManager.get_instance()
+        summary = obs.metrics.get_metrics_summary()
+        print("📈 Aegis Runtime Telemetry Metrikalari:")
+        print("--------------------------------------------------")
+        print("  - Counters:")
+        for k, v in summary.get("counters", {}).items():
+            print(f"      • {k}: {v}")
+        print("  - Latencies (ms):")
+        for k, v in summary.get("latencies", {}).items():
+            print(f"      • {k}: count={v['count']}, avg={v['avg']}ms, p50={v['p50']}ms, p95={v['p95']}ms, p99={v['p99']}ms")
+        return
+
+    if args.subcommand == "audit":
+        from runtime.src.observability import ObservabilityManager
+        obs = ObservabilityManager.get_instance()
+        audits = obs.read_audit_logs(tail=args.tail, session_id=args.session, severity=args.severity)
+        print(f"🛡️ Aegis Security Audit Loglari ({len(audits)} ta topildi):")
+        for entry in audits:
+            print(f"  [{entry.get('timestamp')}] [{entry.get('level')}] [{entry.get('event_type')}] Component: {entry.get('component')} — {entry.get('message')}")
+        return
+
 
     if args.subcommand == "plugins":
         args.plugin_command = "list"
