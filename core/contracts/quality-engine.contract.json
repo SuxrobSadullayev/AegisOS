@@ -1,0 +1,42 @@
+{
+  "$schema": "https://aegis.dev/schemas/kernel-contract.v1.json",
+  "component": "core.engines.quality_engine",
+  "version": "1.0.0",
+  "classification": "Layer 0 Kernel Subsystem",
+  "purpose": "8 ta mustaqil sifat darvozalari (Quality Gates) orqali deterministik sifat nazoratini majburlash",
+  "responsibilities": [
+    "8 ta sifat darvozasini (Arxitektura, Xavfsizlik, Ishlash, Ta'mirlanish, O'qilishi, Test, Hujjat, Izchillik) baholash",
+    "Barcha 8 darvoza PASS bo'lgandagina yetkazib berishga ruxsat berish",
+    "Truth Engine va Reasoning Engine shartnomalariga muvofiqlikni tekshirish"
+  ],
+  "inputs": {
+    "candidate_artifact": "ArtifactObject",
+    "reasoning_trace": "ReasoningTraceObject",
+    "epistemic_graph": "ClaimGraphState"
+  },
+  "outputs": {
+    "quality_report": "QualityReportObject",
+    "overall_status": "Enum<PASS, FAIL>"
+  },
+  "state": {
+    "is_stateful": false
+  },
+  "dependencies": [
+    "core.kernel.constitution",
+    "core.engines.truth_engine",
+    "core.engines.reasoning_engine"
+  ],
+  "consumers": [
+    "core.workflow.workflow",
+    "runtime.generators"
+  ],
+  "guarantees": {
+    "all_or_nothing_pass": "Yagona FAIL darvozasi butun yetkazib berishni to'xtatadi",
+    "deterministic_eval": "Baholash subyektiv emas, ha/yo'q binary mezonlariga tayanadi"
+  },
+  "failure_modes": [
+    "SECURITY_GATE_FAILED: Xavfsizlik darvozasidan o'tmadi",
+    "ARCHITECTURE_VIOLATION: Qatlamlar o'rtasida nojoiz bog'liqlik aniqlandi",
+    "INCOMPLETE_DOCS: Ommaviy interfeys hujjatlashtirilmagan"
+  ]
+}
