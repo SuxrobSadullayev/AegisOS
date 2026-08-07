@@ -1,0 +1,9 @@
+#!/bin/sh
+# Aegis AI Operating System Main Executable
+
+set -e
+
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONPATH="$BASE_DIR:${PYTHONPATH:-}"
+
+exec python3 "$BASE_DIR/runtime/src/cli.py" "$@"
