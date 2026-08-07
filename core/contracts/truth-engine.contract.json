@@ -1,0 +1,44 @@
+{
+  "$schema": "https://aegis.dev/schemas/kernel-contract.v1.json",
+  "component": "core.engines.truth_engine",
+  "version": "1.0.0",
+  "classification": "Layer 0 Kernel Subsystem",
+  "purpose": "Deterministik epistemik holat boshqaruvi va gallyutsinatsiyani nolga tushirish",
+  "responsibilities": [
+    "Da'volarni ichki epistemik grafikda saqlash va kuzatish",
+    "Dalillar darajasini deterministik baholash",
+    "Holat o'tishlarining (State Transitions) invariantlarini majburiy ta'minlash",
+    "Runtime uchun mashina o'qiy oladigan so'rov interfeysini taqdim etish"
+  ],
+  "inputs": {
+    "claims": "Array<ClaimObject>",
+    "evidences": "Array<EvidenceObject>"
+  },
+  "outputs": {
+    "epistemic_graph": "ClaimGraphState",
+    "validation_report": "ValidationReportObject"
+  },
+  "state": {
+    "is_stateful": true,
+    "persistence": "Session Epistemic Graph Memory"
+  },
+  "dependencies": [
+    "core.kernel.constitution"
+  ],
+  "consumers": [
+    "core.engines.reasoning_engine",
+    "core.engines.quality_engine",
+    "runtime.resolvers",
+    "runtime.generators"
+  ],
+  "guarantees": {
+    "zero_unsubstantiated_promotion": "Level 3+ dalilsiz hech bir da'vo VERIFIED_FACT holatiga o'tmaydi",
+    "deterministic_demotion": "Raddiy dalil kelganda holat DARHOL INVALIDATED ga tushadi",
+    "isolation": "Tashqi taqdimot formatlash xatolari ichki epistemik holatga ta'sir qilmaydi"
+  },
+  "failure_modes": [
+    "INSUFFICIENT_EVIDENCE: Dalil darajasi o'tish talabiga yetmaydi",
+    "CYCLIC_INFERENCE: Da'vo o'z-o'ziga bog'liq mantiqiy xulosaga tayanmoqda",
+    "INVALID_TRANSITION: Taqiqlangan holat o'tishiga urinish"
+  ]
+}
