@@ -40,6 +40,8 @@ class PluginState(Enum):
     SUSPENDED = "SUSPENDED"
     UNLOADED = "UNLOADED"
     DESTROYED = "DESTROYED"
+    FAILED = "FAILED"
+
 
 
 class PluginCapability(Enum):
@@ -732,16 +734,18 @@ class PluginSecurityManager:
 # ──────────────────────────────────────────────
 
 _VALID_TRANSITIONS: Dict[PluginState, Set[PluginState]] = {
-    PluginState.DISCOVERED: {PluginState.LOADED, PluginState.DESTROYED},
-    PluginState.LOADED: {PluginState.VALIDATED, PluginState.DESTROYED},
-    PluginState.VALIDATED: {PluginState.RESOLVED, PluginState.DESTROYED},
-    PluginState.RESOLVED: {PluginState.INITIALIZED, PluginState.DESTROYED},
-    PluginState.INITIALIZED: {PluginState.ACTIVE, PluginState.DESTROYED},
-    PluginState.ACTIVE: {PluginState.SUSPENDED, PluginState.UNLOADED, PluginState.ACTIVE},
-    PluginState.SUSPENDED: {PluginState.ACTIVE, PluginState.UNLOADED},
-    PluginState.UNLOADED: {PluginState.DESTROYED},
+    PluginState.DISCOVERED: {PluginState.LOADED, PluginState.DESTROYED, PluginState.FAILED},
+    PluginState.LOADED: {PluginState.VALIDATED, PluginState.DESTROYED, PluginState.FAILED},
+    PluginState.VALIDATED: {PluginState.RESOLVED, PluginState.DESTROYED, PluginState.FAILED},
+    PluginState.RESOLVED: {PluginState.INITIALIZED, PluginState.DESTROYED, PluginState.FAILED},
+    PluginState.INITIALIZED: {PluginState.ACTIVE, PluginState.DESTROYED, PluginState.FAILED},
+    PluginState.ACTIVE: {PluginState.SUSPENDED, PluginState.UNLOADED, PluginState.ACTIVE, PluginState.FAILED},
+    PluginState.SUSPENDED: {PluginState.ACTIVE, PluginState.UNLOADED, PluginState.FAILED},
+    PluginState.UNLOADED: {PluginState.DESTROYED, PluginState.FAILED},
+    PluginState.FAILED: {PluginState.SUSPENDED, PluginState.UNLOADED, PluginState.DESTROYED, PluginState.LOADED, PluginState.VALIDATED, PluginState.RESOLVED, PluginState.INITIALIZED, PluginState.ACTIVE},
     PluginState.DESTROYED: set(),
 }
+
 
 
 class PluginLifecycleManager:
@@ -1246,7 +1250,11 @@ class PluginManager:
         self.hook_dispatcher = HookDispatcher()
         self.manifest_validator = ManifestValidator()
 
+        from runtime.src.sandbox import SandboxManager, SandboxPolicy, SandboxLimits, SandboxRequest, SandboxError, SandboxTimeoutError, SandboxCrashedError
+        self.sandbox_manager = SandboxManager()
+
         self._prompt_contributions: List[PluginPromptContribution] = []
+
 
     # ── Discovery ──
 
@@ -1481,8 +1489,25 @@ class PluginManager:
             start = time.time()
             is_error = False
             try:
-                result = instance.on_execute(ctx, data)
+                # Check if sandbox process worker is active for this plugin
+                if self.sandbox_manager.is_worker_alive(plugin_id):
+                    from runtime.src.sandbox import SandboxRequest, SandboxTimeoutError, SandboxCrashedError
+                    req = SandboxRequest(
+                        command="EXECUTE",
+                        payload=data,
+                        plugin_id=plugin_id,
+                        capability_token=token.plugin_id if token else None
+                    )
+                    resp = self.sandbox_manager.send_request(plugin_id, req)
+                    if not resp.success:
+                        raise PluginError(f"Sandbox execution error: {resp.error}")
+                    result = resp.result
+                else:
+                    result = instance.on_execute(ctx, data)
             except Exception as e:
+                from runtime.src.sandbox import SandboxTimeoutError, SandboxCrashedError
+                if isinstance(e, (SandboxTimeoutError, SandboxCrashedError)):
+                    meta.state = PluginState.FAILED
                 is_error = True
                 self.event_bus.publish(PluginEvent(
                     event_type="PLUGIN_ERROR",
@@ -1490,11 +1515,13 @@ class PluginManager:
                     payload={"error": str(e)}
                 ))
                 raise
+
             finally:
                 duration = (time.time() - start) * 1000.0
                 self.metrics_collector.record_call(plugin_id, duration, is_error)
 
             return result
+
 
     # ── Suspend / Resume ──
 
@@ -1551,9 +1578,11 @@ class PluginManager:
             self.security.revoke_token(plugin_id)
             self.capability_registry.unregister_plugin(plugin_id)
             self.hook_dispatcher.unregister_plugin(plugin_id)
+            self.sandbox_manager.terminate_worker(plugin_id)
             self._prompt_contributions = [
                 c for c in self._prompt_contributions if c.plugin_id != plugin_id
             ]
+
 
             self.event_bus.publish(PluginEvent(
                 event_type="PLUGIN_UNLOADED",
