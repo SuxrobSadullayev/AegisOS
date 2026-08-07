@@ -1,20 +1,20 @@
 # Truth Engine Specification
-<!-- Token budget: ~850 tokens | Version: 1.0.0 | Tier 1 Core Engine -->
+<!-- Token budget: ~880 tokens | Version: 1.1.0 | Classification: Layer 0 Kernel Engine -->
 
-The Truth Engine is Layer 0 Kernel Subsystem responsible for tracking epistemic
-claim states, enforcing evidence thresholds, and eliminating hallucinations
-through deterministic state transitions.
+The Truth Engine is a Layer 0 Kernel Subsystem responsible for tracking internal
+claim states, managing claim dependency graphs (DAG), enforcing evidence lifecycle
+transitions, and eliminating hallucinations through deterministic verification rules.
 
 ---
 
-## 1. System Architecture & Decoupling
+## 1. Decoupled Architecture
 
-The Truth Engine operates strictly inside the Kernel Epistemic Registry.
-It decouples internal claim tracking from external user presentation.
+The Truth Engine operates exclusively within the Kernel Epistemic Registry.
+It separates internal machine-readable claim tracking from user-facing presentation.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Kernel Epistemic Registry (Internal Claim Graph)            │
+│ Kernel Epistemic Registry (Internal Claim Graph DAG)        │
 │ Claim States: UNKNOWN | HYPOTHESIS | INFERENCE | VERIFIED   │
 └──────────────────────────────┬──────────────────────────────┘
                                │ Machine-Readable API
@@ -22,37 +22,51 @@ It decouples internal claim tracking from external user presentation.
 ┌─────────────────────────────────────────────────────────────┐
 │ Adapter Presentation Layer                                  │
 │ Converts internal state to target format (Silent/Annotated) │
-└─────────────────────────────────────────────────────────────┘
+└──────────────────────────────┴──────────────────────────────┘
 ```
 
-- **Internal Epistemic State**: Maintained as an in-memory dependency graph.
-- **External Presentation**: Adapters render clean prose by default. Debug
-  annotations are applied only when explicitly configured by runtime.
+- **Internal Epistemic State**: In-memory Directed Acyclic Graph (DAG) using immutable `ClaimID`s.
+- **External Presentation**: Clean prose by default. Epistemic annotations (`[CLM-XXXXXX]`) are rendered only in debug modes.
 
 ---
 
-## 2. Epistemic State Machine
+## 2. Claim Identity & Dependency Graph (DAG)
 
-Claims progress through a deterministic state machine based on evidence strength:
+### Claim Identity Schema
+Every claim receives an immutable, globally unique ID: `CLM-<SEQ_6>` (e.g., `CLM-000042`).
+
+```json
+{
+  "claim_id": "CLM-000042",
+  "statement": "PostgreSQL connection pool size exceeding 20 causes latency spikes",
+  "state": "INFERENCE",
+  "evidence_refs": ["EVD-000104"],
+  "depends_on_claim_ids": ["CLM-000012"]
+}
+```
+
+### Cascade Invalidation Algorithm
+Claims are linked in a Directed Acyclic Graph ($G = (V, E)$).
+
+- **Rule C-01 (Cascade Propagation)**: If an upstream claim $C_u$ transitions to `INVALIDATED` or `SUSPECT`, all descendant claims $C_d$ depending on $C_u$ transition to `SUSPECT` automatically.
+- **Rule C-02 (Cycle Prohibition)**: Circular dependency insertion ($C_A \to C_B \to C_A$) is strictly prohibited during graph edge creation.
+
+---
+
+## 3. Epistemic State Machine
+
+Claims progress through a deterministic state machine:
 
 ```
 UNKNOWN ──(Level 1+)──▶ HYPOTHESIS ──(Level 2+)──▶ INFERENCE ──(Level 3+)──▶ VERIFIED_FACT
    │                       │                          │                         │
    └───────────────────────┴───────────┬──────────────┴─────────────────────────┘
-                                       │ Counter-Evidence
+                                       │ Counter-Evidence / Expired Evidence
                                        ▼
-                                  INVALIDATED
+                                  INVALIDATED / SUSPECT
 ```
 
-### State Definitions
-
-- `UNKNOWN`: Unassessed or unverified claim.
-- `HYPOTHESIS`: Speculative assertion requiring empirical or deductive proof.
-- `INFERENCE`: Logical deduction derived from established facts.
-- `VERIFIED_FACT`: Indisputable claim backed by static code, docs, or execution.
-- `INVALIDATED`: Refuted claim discredited by counter-evidence.
-
-### State Transition Invariants
+### Transition Invariants
 
 - **T-01 (Sequential Promotion)**: `HYPOTHESIS` → `INFERENCE` requires Level 2+ evidence. `INFERENCE` → `VERIFIED_FACT` requires Level 3+ evidence.
 - **T-02 (Direct Verification Guard)**: `HYPOTHESIS` → `VERIFIED_FACT` is forbidden without Level 4 or Level 5 evidence.
@@ -61,9 +75,9 @@ UNKNOWN ──(Level 1+)──▶ HYPOTHESIS ──(Level 2+)──▶ INFERENCE
 
 ---
 
-## 3. Evidence Hierarchy Model
+## 4. Evidence Hierarchy & Lifecycle
 
-Evidence is categorized into 6 deterministic strength levels:
+### Evidence Hierarchy (Levels 0–5)
 
 | Level | Identifier | Source | Verification Capacity | Minimum State Target |
 |:------|:-----------|:-------|:----------------------|:---------------------|
@@ -74,24 +88,31 @@ Evidence is categorized into 6 deterministic strength levels:
 | **1** | `PARAMETRIC` | LLM Parametric Memory | Probabilistic | `HYPOTHESIS` |
 | **0** | `UNSUBSTANTIATED` | User Assertion / Speculative Prompt | Speculative | `UNKNOWN` |
 
-### Minimum Evidence Thresholds
+### Evidence Lifecycle States
 
-- `HYPOTHESIS`: Requires minimum Level 1 evidence.
-- `INFERENCE`: Requires minimum Level 2 evidence derived from Level 3+ facts.
-- `VERIFIED_FACT`: Requires minimum Level 3 (Code), Level 4 (Doc), or Level 5 (Tool Execution).
+Evidence states trigger automatic claim re-evaluation:
+
+- `ACTIVE`: Valid evidence. Claim retains current state.
+- `EXPIRED`: File modified or session TTL elapsed. Claim demoted to `HYPOTHESIS`.
+- `SUPERSEDED`: Higher-level evidence introduced. Claim re-evaluated.
+- `CONTRADICTED`: Counter-evidence found. Claim transitions immediately to `INVALIDATED`.
+- `DEPRECATED`: Underlying spec outdated. Claim transitions to `SUSPECT`.
+- `UNAVAILABLE`: Resource or tool missing. Claim demoted to `HYPOTHESIS`.
 
 ---
 
-## 4. Runtime Query Interface
+## 5. Runtime Query Interface
 
-The Truth Engine exposes a machine-readable JSON API for runtime evaluation:
+Machine-readable JSON interface for runtime components:
 
 ```json
 {
   "contract": "core.contracts.truth_engine",
+  "version": "1.1.0",
   "queries": {
     "get_unverified_hypotheses": "Returns Array<Claim> where state == 'HYPOTHESIS'",
     "get_weak_assumptions": "Returns Array<Claim> where state == 'INFERENCE' and evidence_level < 3",
+    "get_claim_dependents": "Returns Array<Claim> where depends_on_claim_ids includes target_id",
     "validate_claim_chain": "Returns boolean indicating whether all prerequisite claims are VERIFIED_FACT"
   }
 }
@@ -99,39 +120,26 @@ The Truth Engine exposes a machine-readable JSON API for runtime evaluation:
 
 ---
 
-## 5. Evaluation
+## 6. Evaluation
 
 ### Success Criteria
-
 - Zero claims promoted to `VERIFIED_FACT` without Level 3+ evidence.
-- 100% of invalidated claims immediately isolated from reasoning chains.
+- 100% cascade invalidation across DAG when upstream claims are invalidated.
 - Zero presentation label pollution in standard adapter outputs.
 
-### Failure Modes
-
-- **Silent Fabrication**: Promoting Level 1 memory claims directly to `VERIFIED_FACT`.
-- **State Deadlock**: Hypotheses locked without empirical verification pathways.
-- **Stale Evidence**: Retaining Level 3 `VERIFIED_FACT` status after underlying workspace files change.
-
 ### Metrics & Acceptance Criteria
-
 | Metric | Target | Acceptance Threshold |
 |:-------|:-------|:---------------------|
 | Unsubstantiated Promotion Rate | 0.0 | **0.0 (Zero Tolerance)** |
-| Epistemic Graph Integrity | % of valid state transitions | **100%** |
+| DAG Invalidation Cascade Accuracy | % of dependent claims updated | **100%** |
 | Runtime Query Latency | Milliseconds to resolve claim graph | **< 5ms** |
-
-### Regression Risks
-
-- Over-caution: Refusing to produce inferences when Level 3 code evidence is available.
-- Mitigation: Resolvers must auto-trigger static inspection tools when Level 1 claims arise.
 
 ---
 
-## 6. Verification Checklist
+## 7. Verification Checklist
 
+- [ ] Does every claim possess an immutable `ClaimID` (`CLM-XXXXXX`)?
+- [ ] Are claims linked via Directed Acyclic Graph (DAG) without cycles?
+- [ ] Does upstream claim invalidation trigger automatic downstream cascade?
+- [ ] Does evidence `EXPIRED`/`UNAVAILABLE` status demote claims to `HYPOTHESIS`?
 - [ ] Are internal claim states decoupled from user-facing presentation?
-- [ ] Is every `VERIFIED_FACT` backed by Level 3, 4, or 5 evidence?
-- [ ] Are direct `HYPOTHESIS` → `VERIFIED_FACT` transitions guarded by Level 4/5 proof?
-- [ ] Does counter-evidence immediately trigger `INVALIDATED` state?
-- [ ] Are runtime query interfaces JSON-Schema compliant?

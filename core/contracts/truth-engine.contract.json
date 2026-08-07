@@ -1,26 +1,30 @@
 {
   "$schema": "https://aegis.dev/schemas/kernel-contract.v1.json",
   "component": "core.engines.truth_engine",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "classification": "Layer 0 Kernel Subsystem",
-  "purpose": "Deterministik epistemik holat boshqaruvi va gallyutsinatsiyani nolga tushirish",
+  "purpose": "Deterministik epistemik holat va da'volar grafigi (DAG) boshqaruvi hamda dalillar hayot sikli orqali gallyutsinatsiyani nolga tushirish",
   "responsibilities": [
-    "Da'volarni ichki epistemik grafikda saqlash va kuzatish",
-    "Dalillar darajasini deterministik baholash",
-    "Holat o'tishlarining (State Transitions) invariantlarini majburiy ta'minlash",
+    "Da'volarni unikal ClaimID (CLM-XXXXXX) bilan ichki DAG grafigida saqlash",
+    "Kaskadli bekor qilish (Cascade Invalidation) algoritmiga ko'ra bog'liqlik zanjirini yangilash",
+    "Dalillar hayot sikli (ACTIVE, EXPIRED, SUPERSEDED, CONTRADICTED, DEPRECATED, UNAVAILABLE) o'tishlarini boshqarish",
+    "Dalillar darajasini deterministik baholash (Level 0-5)",
     "Runtime uchun mashina o'qiy oladigan so'rov interfeysini taqdim etish"
   ],
   "inputs": {
     "claims": "Array<ClaimObject>",
-    "evidences": "Array<EvidenceObject>"
+    "evidences": "Array<EvidenceObject>",
+    "dependency_edges": "Array<DependencyEdgeObject>"
   },
   "outputs": {
-    "epistemic_graph": "ClaimGraphState",
-    "validation_report": "ValidationReportObject"
+    "claim_dag_graph": "ClaimGraphState",
+    "validation_report": "ValidationReportObject",
+    "cascade_invalidation_list": "Array<ClaimID>"
   },
   "state": {
     "is_stateful": true,
-    "persistence": "Session Epistemic Graph Memory"
+    "persistence": "Session Epistemic Graph Memory (DAG)",
+    "claim_id_format": "CLM-<SEQ_6>"
   },
   "dependencies": [
     "core.kernel.constitution"
@@ -33,12 +37,14 @@
   ],
   "guarantees": {
     "zero_unsubstantiated_promotion": "Level 3+ dalilsiz hech bir da'vo VERIFIED_FACT holatiga o'tmaydi",
-    "deterministic_demotion": "Raddiy dalil kelganda holat DARHOL INVALIDATED ga tushadi",
+    "cascade_invalidation_guarantee": "Yuqori oqimdagi fakt bekor bo'lganda quyi da'volar avtomatik SUSPECT/INVALIDATED holatiga o'tadi",
+    "deterministic_demotion": "EXPIRED yoki CONTRADICTED dalil kelganda holat DARHOL pasaytiriladi",
     "isolation": "Tashqi taqdimot formatlash xatolari ichki epistemik holatga ta'sir qilmaydi"
   },
   "failure_modes": [
     "INSUFFICIENT_EVIDENCE: Dalil darajasi o'tish talabiga yetmaydi",
-    "CYCLIC_INFERENCE: Da'vo o'z-o'ziga bog'liq mantiqiy xulosaga tayanmoqda",
-    "INVALID_TRANSITION: Taqiqlangan holat o'tishiga urinish"
+    "CYCLIC_INFERENCE: Da'volar grafigida sirkulyar bog'liqlik aniqlandi",
+    "INVALID_TRANSITION: Taqiqlangan holat o'tishiga urinish",
+    "STALE_EVIDENCE_DEPENDENCY: Eskirgan dalilga tayanayotgan da'vo aniqlandi"
   ]
 }
