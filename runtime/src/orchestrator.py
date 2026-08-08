@@ -362,6 +362,170 @@ class AutoRepairStage(PipelineStage):
         return StageResult(success=True, context=new_ctx)
 
 
+class ToolExecutionStage(PipelineStage):
+    """Pipeline stage executing real filesystem tool actions requested in tasks or model responses.
+    Enforces SandboxPolicy security rules, path security validation, and verifies real file existence and content.
+    """
+
+    def __init__(self, plugin_manager: Optional[Any] = None):
+        super().__init__("ToolExecutionStage")
+        self.plugin_manager = plugin_manager
+
+    def execute(self, context: OrchestratorContext, tracer: PipelineTracer) -> StageResult:
+        import os
+        import time
+        start_time = time.time()
+        user_prompt = context.user_prompt
+        resp = context.model_response
+
+        if not resp or not resp.text:
+            duration = (time.time() - start_time) * 1000.0
+            tracer.record_metric(self.name, duration)
+            return StageResult(success=True, context=context)
+
+        parsed = self._parse_file_action(user_prompt, resp.text)
+        if not parsed:
+            # Normal informational prompt — no file action requested
+            duration = (time.time() - start_time) * 1000.0
+            tracer.record_metric(self.name, duration)
+            return StageResult(success=True, context=context)
+
+        target_file, content, action_type = parsed
+
+        # Security check: Use PluginWorker path validation rules from sandbox.py
+        from runtime.src.sandbox import PluginWorker, SandboxPolicy
+        policy = SandboxPolicy(
+            allow_filesystem_read=True,
+            allow_filesystem_write=True,
+            allowed_paths=[os.getcwd()]
+        )
+        worker = PluginWorker("tool_executor_plugin", policy)
+
+        path_error = worker._validate_path_security(target_file)
+        if path_error:
+            error_report = f"❌ File Action Failed: Security Policy Violation — {path_error}"
+            new_resp = ModelResponse(
+                text=error_report,
+                token_count=resp.token_count,
+                latency_ms=resp.latency_ms,
+                provider=resp.provider,
+                model=resp.model,
+                finish_reason="SECURITY_BLOCKED"
+            )
+            new_ctx = context.copy_with(model_response=new_resp)
+            duration = (time.time() - start_time) * 1000.0
+            tracer.record_metric(self.name, duration)
+            return StageResult(success=True, context=new_ctx)
+
+        try:
+            abs_path = os.path.abspath(target_file)
+
+            # Check symlink or path traversal on resolved absolute path
+            resolved_error = worker._validate_path_security(abs_path)
+            if resolved_error:
+                raise PermissionError(f"Security policy violation: {resolved_error}")
+
+            # Check containment inside current project workspace
+            cwd = os.path.abspath(os.getcwd())
+            if not abs_path.startswith(cwd):
+                raise PermissionError(f"Path '{abs_path}' is outside active project workspace '{cwd}'")
+
+            # Execute real physical write to filesystem
+            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+            with open(abs_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            # REAL EMPIRICAL VERIFICATION FROM DISK
+            if not os.path.exists(abs_path):
+                raise FileNotFoundError(f"Verification failed: File '{abs_path}' does not exist on disk after write")
+
+            with open(abs_path, "r", encoding="utf-8") as f:
+                verified_content = f.read()
+
+            file_size = os.path.getsize(abs_path)
+
+            report = (
+                f"✅ File Action Executed & Verified Successfully:\n"
+                f"  - Action       : {action_type}\n"
+                f"  - File Path    : {abs_path}\n"
+                f"  - File Size    : {file_size} bytes\n"
+                f"  - Verification : EXISTS_AND_READABLE\n"
+                f"  - Verified Content:\n```\n{verified_content}\n```"
+            )
+
+            new_resp = ModelResponse(
+                text=report,
+                token_count=resp.token_count,
+                latency_ms=resp.latency_ms,
+                provider=resp.provider,
+                model=resp.model,
+                finish_reason="STOP"
+            )
+            new_ctx = context.copy_with(model_response=new_resp)
+
+        except Exception as exc:
+            error_report = f"❌ File Action Failed: {str(exc)}"
+            new_resp = ModelResponse(
+                text=error_report,
+                token_count=resp.token_count,
+                latency_ms=resp.latency_ms,
+                provider=resp.provider,
+                model=resp.model,
+                finish_reason="EXECUTION_ERROR"
+            )
+            new_ctx = context.copy_with(model_response=new_resp)
+
+        duration = (time.time() - start_time) * 1000.0
+        tracer.record_metric(self.name, duration)
+        return StageResult(success=True, context=new_ctx)
+
+    def _parse_file_action(self, user_prompt: str, response_text: str) -> Optional[Tuple[str, str, str]]:
+        """Parses target filename, content, and action type from user prompt and model response."""
+        import re
+
+        prompt_l = user_prompt.lower()
+        is_file_task = any(kw in prompt_l for kw in ["create", "write", "generate file", "make file", "save file", "save to"])
+
+        if not is_file_task:
+            return None
+
+        filename = None
+        # Match explicit filename pattern: create a file named X.txt, create file X.py, write X.py
+        fn_match = re.search(r"(?:create|write|make|generate)\s+(?:a\s+)?(?:file\s+)?(?:named\s+|called\s+)?['\"]?([a-zA-Z0-9_\-\.\/]+)['\"]?", user_prompt, re.IGNORECASE)
+        if fn_match:
+            cand = fn_match.group(1).strip("'\"` ")
+            if "." in cand or cand.endswith(".py") or cand.endswith(".txt") or cand.endswith(".json") or cand.endswith(".md"):
+                filename = cand
+
+        if not filename:
+            ext_match = re.search(r"\b([a-zA-Z0-9_\-]+\.(?:py|txt|json|md|c|cpp|rs|ts|js|html|css|yaml|yml|sh))\b", user_prompt, re.IGNORECASE)
+            if ext_match:
+                filename = ext_match.group(1)
+
+        if not filename:
+            return None
+
+        # Extract content specified in prompt or code blocks in model response
+        content = ""
+        content_match = re.search(r"containing\s+(?:exactly:?\s*)?['\"](.*?)['\"]", user_prompt, re.IGNORECASE | re.DOTALL)
+        if not content_match:
+            content_match = re.search(r"containing\s+(?:exactly:?\s*)?([^\n]+)", user_prompt, re.IGNORECASE)
+
+        if content_match:
+            content = content_match.group(1).strip()
+            content = re.sub(r"\s+and verify (it|the file).*", "", content, flags=re.IGNORECASE).strip()
+
+        if not content and response_text:
+            code_block_match = re.search(r"```(?:[a-zA-Z0-9_\-]+)?\n(.*?)```", response_text, re.DOTALL)
+            if code_block_match:
+                content = code_block_match.group(1)
+
+        if not content:
+            content = f"# Created by Aegis AI OS for task: {user_prompt}\n"
+
+        return (filename, content, "CREATE_FILE")
+
+
 class RuntimeOrchestrator:
     """Central Aegis Runtime Orchestrator Machine with Plugin System and Session Persistence Integration."""
 
@@ -381,7 +545,7 @@ class RuntimeOrchestrator:
         self.plugin_manager = plugin_manager
         self.stages: List[PipelineStage] = []
 
-        # Register default 9 core pipeline stages
+        # Register default 10 core pipeline stages
         self._register_default_stages()
 
     def _register_default_stages(self):
@@ -395,6 +559,7 @@ class RuntimeOrchestrator:
             ModelGatewayStage(self.provider),
             QualityEngineStage(self.provider),
             AutoRepairStage(self.provider),
+            ToolExecutionStage(self.plugin_manager),
         ]
 
     def register_stage(self, stage: PipelineStage, position: Optional[int] = None):
