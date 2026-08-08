@@ -76,6 +76,21 @@ class AegisConfig:
     base_dir: str = ""
     enabled_plugins: List[str] = field(default_factory=list)
 
+    def __repr__(self) -> str:
+        """Secret-safe string representation preventing API key leakage."""
+        key_repr = "[REDACTED]" if self.gemini_api_key else ""
+        return (
+            f"AegisConfig(provider={self.provider!r}, gemini_api_key={key_repr!r}, "
+            f"gemini_model={self.gemini_model!r}, temperature={self.temperature}, "
+            f"max_tokens={self.max_tokens}, reasoning_depth={self.reasoning_depth!r}, "
+            f"max_retries={self.max_retries}, confidence_threshold={self.confidence_threshold}, "
+            f"core_token_budget={self.core_token_budget}, verbose={self.verbose}, "
+            f"debug_mode={self.debug_mode})"
+        )
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> "AegisConfig":
         """

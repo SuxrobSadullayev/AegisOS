@@ -259,12 +259,12 @@ class EventRedactor:
 # ──────────────────────────────────────────────
 
 class EventSerializer:
-    """JSON Serializer for Observability Events."""
+    """JSON Serializer for Observability Events with safe object fallback."""
 
     @staticmethod
     def serialize(event: ObservabilityEvent) -> str:
         redacted_dict = EventRedactor.redact_object(event.to_dict())
-        return json.dumps(redacted_dict)
+        return json.dumps(redacted_dict, default=str)
 
 
 class EventSink(ABC):

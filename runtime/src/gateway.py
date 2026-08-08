@@ -29,6 +29,14 @@ class ModelResponse:
     finish_reason: str = "STOP"
     raw_response: Optional[Dict[str, Any]] = None
 
+    def __post_init__(self):
+        if self.raw_response:
+            try:
+                from runtime.src.observability import EventRedactor
+                self.raw_response = EventRedactor.redact_object(self.raw_response)
+            except Exception:
+                pass
+
 
 class ModelGatewayInterface(ABC):
     """Common Interface for all Aegis Model Providers."""
@@ -121,23 +129,54 @@ class BaseHTTPProvider(ModelGatewayInterface):
         self.default_model = default_model
         self.timeout = 30.0
 
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(provider={self.provider_name!r}, model={self.default_model!r})"
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
+    @staticmethod
+    def _redact_url(url: str) -> str:
+        """Removes API keys, tokens, and secrets from URL strings for safe error reporting."""
+        import re
+        if not url:
+            return ""
+        # 1. Remove key=, api_key= query param values
+        redacted = re.sub(r'([?&])(key|api_key|token|secret|auth)=([^&]*)', r'\1\2=[REDACTED]', url, flags=re.IGNORECASE)
+        # 2. Use EventRedactor if available for comprehensive pattern masking
+        try:
+            from runtime.src.observability import EventRedactor
+            redacted = EventRedactor.redact_text(redacted)
+        except Exception:
+            redacted = re.sub(r'(sk-[A-Za-z0-9_-]{5,})', '[REDACTED]', redacted)
+            redacted = re.sub(r'(AIzaSy[A-Za-z0-9_-]+)', '[REDACTED]', redacted)
+        return redacted
+
     def _execute_http_request_with_retry(self, url: str, headers: Dict[str, str], payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Executes HTTP request with exponential backoff retry. NEVER leaks secrets in error messages."""
         data = json.dumps(payload).encode("utf-8")
         retries = 0
         max_retries = self.config.max_retries
         backoff = 1.0
 
         ctx = ssl.create_default_context()
+        safe_url = self._redact_url(url)
 
         while retries <= max_retries:
             req = urllib.request.Request(url, data=data, headers=headers, method="POST")
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout, context=ctx) as resp:
                     resp_bytes = resp.read()
-                    return json.loads(resp_bytes.decode("utf-8"))
+                    try:
+                        return json.loads(resp_bytes.decode("utf-8"))
+                    except Exception as json_err:
+                        safe_raw = self._redact_url(resp_bytes.decode("utf-8", errors="ignore"))
+                        raise RuntimeError(f"{self.provider_name} returned malformed JSON response: {safe_raw[:200]}") from None
             except urllib.error.HTTPError as e:
                 status = e.code
                 error_body = e.read().decode("utf-8", errors="ignore")
+                # Redact any secrets that may appear in error body
+                safe_body = self._redact_url(error_body)
 
                 # Handle Rate Limits (429) or Server Errors (5xx) with backoff
                 if status in (429, 500, 502, 503, 504) and retries < max_retries:
@@ -146,7 +185,7 @@ class BaseHTTPProvider(ModelGatewayInterface):
                     time.sleep(sleep_time)
                     continue
                 else:
-                    raise RuntimeError(f"{self.provider_name} API HTTP Error {status}: {error_body}")
+                    raise RuntimeError(f"{self.provider_name} API HTTP Error {status}: {safe_body}")
             except (urllib.error.URLError, TimeoutError) as e:
                 if retries < max_retries:
                     retries += 1
@@ -154,7 +193,8 @@ class BaseHTTPProvider(ModelGatewayInterface):
                     time.sleep(sleep_time)
                     continue
                 else:
-                    raise RuntimeError(f"{self.provider_name} Connection Timeout/Error: {str(e)}")
+                    # Never include the original URL (may contain API key) in error messages
+                    raise RuntimeError(f"{self.provider_name} Connection Timeout/Error for {safe_url}")
 
         raise RuntimeError(f"{self.provider_name} Max Retries Exceeded ({max_retries})")
 
@@ -173,8 +213,13 @@ class GeminiProvider(BaseHTTPProvider):
             # Fall back to mock if API key is not configured
             return MockProvider(self.config).generate(system_prompt, user_prompt)
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.default_model}:generateContent?key={api_key}"
-        headers = {"Content-Type": "application/json"}
+        # SECURITY: API key sent via x-goog-api-key header instead of URL query parameter
+        # to prevent secret leakage in error messages, logs, and stack traces
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.default_model}:generateContent"
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        }
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}]

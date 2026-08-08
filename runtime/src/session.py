@@ -182,17 +182,25 @@ class SessionContext:
 
 
 class PersistenceManager:
-    """Handles file-based JSON persistence, SHA-256 verification, and snapshot recovery."""
+    """Handles file-based JSON persistence, SHA-256 verification, atomic writes, and snapshot recovery.
+
+    CRASH SAFETY: Barcha yozish operatsiyalari write-to-temp + fsync + atomic rename
+    pattern'ini qo'llaydi. Crash paytida fayl hech qachon qisman yozilgan holda qolmaydi.
+    """
 
     def __init__(self, storage_dir: str):
         self.storage_dir = os.path.abspath(storage_dir)
         os.makedirs(self.storage_dir, exist_ok=True)
 
     def save_snapshot(self, session: SessionContext) -> Snapshot:
+        """Atomically saves session snapshot with crash-safe write pattern, 0o600 permissions, and dir fsync."""
         payload_dict = session.to_dict()
-        json_str = json.dumps(payload_dict, indent=2)
-        checksum = hashlib.sha256(json_str.encode("utf-8")).hexdigest()
+        # Compute payload checksum
+        data_to_hash = json.dumps(payload_dict, sort_keys=True).encode("utf-8")
+        checksum = hashlib.sha256(data_to_hash).hexdigest()
+        payload_dict["checksum"] = checksum
 
+        json_str = json.dumps(payload_dict, indent=2)
         snapshot_id = f"SNAP_{session.session_id}_{int(time.time())}"
         snapshot = Snapshot(
             snapshot_id=snapshot_id,
@@ -202,8 +210,47 @@ class PersistenceManager:
         )
 
         file_path = os.path.join(self.storage_dir, f"{session.session_id}.json")
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(json_str)
+        tmp_path = file_path + ".tmp"
+        bak_path = file_path + ".bak"
+
+        try:
+            # Step 1: Write to temporary file with strict 0o600 permissions
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            fd = os.open(tmp_path, flags, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json_str)
+                f.flush()
+                os.fsync(f.fileno())
+
+            # Step 2: Best-effort backup of existing file without deleting file_path
+            if os.path.exists(file_path):
+                try:
+                    import shutil
+                    shutil.copyfile(file_path, bak_path)
+                except Exception:
+                    pass
+
+            # Step 3: Atomic replace tmp -> target (file_path is never missing)
+            os.replace(tmp_path, file_path)
+
+            # Step 4: Fsync parent directory to persist directory entry across power loss
+            try:
+                dir_fd = os.open(self.storage_dir, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except Exception:
+                pass
+
+        except Exception as exc:
+            # Clean up temp file on failure
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+            raise exc
 
         return snapshot
 
@@ -211,20 +258,71 @@ class PersistenceManager:
         """Verifies SHA-256 checksum integrity of a session snapshot."""
         if not snapshot or not snapshot.checksum or not snapshot.serialized_data:
             return False
-        expected = hashlib.sha256(snapshot.serialized_data.encode("utf-8")).hexdigest()
-        return snapshot.checksum == expected
-
+        try:
+            data = json.loads(snapshot.serialized_data)
+            data_copy = dict(data)
+            data_copy.pop("checksum", None)
+            expected = hashlib.sha256(json.dumps(data_copy, sort_keys=True).encode("utf-8")).hexdigest()
+            return snapshot.checksum == expected or snapshot.checksum == hashlib.sha256(snapshot.serialized_data.encode("utf-8")).hexdigest()
+        except Exception:
+            return False
 
     def load_session(self, session_id: str) -> Optional[SessionContext]:
+        """Loads session from disk with SHA-256 checksum integrity check and automatic backup recovery."""
         file_path = os.path.join(self.storage_dir, f"{session_id}.json")
-        if not os.path.exists(file_path):
-            return None
+        bak_path = file_path + ".bak"
 
-        with open(file_path, "r", encoding="utf-8") as f:
-            raw_text = f.read()
+        # Try primary file first, then backup on failure
+        for try_path in [file_path, bak_path]:
+            if not os.path.exists(try_path):
+                continue
 
-        data = json.loads(raw_text)
+            try:
+                with open(try_path, "r", encoding="utf-8") as f:
+                    raw_text = f.read()
 
+                if not raw_text.strip():
+                    continue  # Empty file, try backup
+
+                data = json.loads(raw_text)
+
+                # Checksum verification if present
+                if "checksum" in data:
+                    stored_checksum = data["checksum"]
+                    data_copy = dict(data)
+                    data_copy.pop("checksum", None)
+                    computed_checksum = hashlib.sha256(json.dumps(data_copy, sort_keys=True).encode("utf-8")).hexdigest()
+                    if stored_checksum != computed_checksum:
+                        import logging
+                        logging.getLogger("AegisPersistence").warning(
+                            "Checksum mismatch for session '%s' in '%s'. Falling back to backup.", session_id, try_path
+                        )
+                        continue
+
+                session = self._deserialize_session(data)
+
+                # If loaded from backup, restore it as primary
+                if try_path == bak_path and session is not None:
+                    try:
+                        self.save_snapshot(session)
+                    except Exception:
+                        pass
+
+                return session
+
+            except (json.JSONDecodeError, KeyError, ValueError) as exc:
+                import logging
+                logging.getLogger("AegisPersistence").warning(
+                    "Session '%s' file corrupted (%s): %s. Trying backup...",
+                    session_id, try_path, exc
+                )
+                continue
+
+        return None
+
+    @staticmethod
+    def _deserialize_session(data: Dict[str, Any]) -> SessionContext:
+        """Deserializes a session dictionary into SessionContext."""
         # Restore ConversationHistory
         history = ConversationHistory()
         history.total_tokens = data.get("history", {}).get("total_tokens", 0)

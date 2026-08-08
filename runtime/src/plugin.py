@@ -123,7 +123,7 @@ class PluginDependency:
 
 @dataclass
 class PluginManifest:
-    """Static declaration of plugin identity and requirements."""
+    """Static declaration of plugin identity and requirements (Manifest V2)."""
     plugin_id: str
     name: str
     version: str
@@ -141,6 +141,11 @@ class PluginManifest:
     entry_point: str = "plugin.py"
     config: Dict[str, Any] = field(default_factory=dict)
     publisher: str = ""
+    repository: str = ""
+    homepage: str = ""
+    checksum: str = ""
+    signature: str = ""
+    namespace: str = "community"  # official, community, local
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -165,6 +170,11 @@ class PluginManifest:
             "entry_point": self.entry_point,
             "config": self.config,
             "publisher": self.publisher,
+            "repository": self.repository,
+            "homepage": self.homepage,
+            "checksum": self.checksum,
+            "signature": self.signature,
+            "namespace": self.namespace,
         }
 
 
@@ -1033,6 +1043,11 @@ class PluginDiscovery:
             entry_point=str(data.get("entry_point", "plugin.py")),
             config=config,
             publisher=str(data.get("publisher", "")),
+            repository=str(data.get("repository", "")),
+            homepage=str(data.get("homepage", "")),
+            checksum=str(data.get("checksum", "")),
+            signature=str(data.get("signature", "")),
+            namespace=str(data.get("namespace", "community")),
         )
 
     @staticmethod
@@ -1620,11 +1635,13 @@ class PluginManager:
     # ── Hot Reload (transactional) ──
 
     def reload_plugin(self, plugin_id: str, new_instance: PluginInterface) -> bool:
-        """Hot-reloads a plugin using transactional swap.
+        """Hot-reloads a plugin using a strict transactional atomic swap.
 
-        Jarayon: old plugin suspend → validate new → initialize new →
-                 atomic swap → activate new → old unload.
-        State corruption bo'lmasligi kafolatlanadi.
+        TRANSACTIONAL INVARIANT:
+        1. Validate manifest & dependencies of new_instance FIRST.
+        2. Initialize & Activate new_instance in a staging context BEFORE touching old_instance.
+        3. If staging fails: destroy new_instance, old_instance remains 100% ACTIVE and untouched.
+        4. Atomic swap under lock: suspend old → swap registry instance → swap capabilities/hooks → unload old.
         """
         with self._lock:
             meta = self.registry.get_metadata(plugin_id)
@@ -1632,9 +1649,12 @@ class PluginManager:
                 raise PluginLifecycleError(f"Plugin '{plugin_id}' must be ACTIVE for hot-reload")
 
             old_instance = self.registry.get_instance(plugin_id)
-            ctx = PluginContext(plugin_id=plugin_id, config=dict(meta.manifest.config))
+            if not old_instance:
+                raise PluginError(f"Plugin '{plugin_id}' has no loaded instance")
 
-            # 1. Validate new instance manifest
+            old_ctx = PluginContext(plugin_id=plugin_id, config=dict(meta.manifest.config))
+
+            # Step 1: Validate new_instance manifest
             new_manifest = new_instance.get_manifest()
             validation_errors = self.manifest_validator.validate(new_manifest)
             if validation_errors:
@@ -1642,34 +1662,98 @@ class PluginManager:
                     f"Yangi plugin instance validatsiya xatoliklari: {'; '.join(validation_errors)}"
                 )
 
-            # 2. Suspend old
-            if old_instance:
-                old_instance.on_suspend(ctx)
+            # Step 2: Validate dependency compatibility
+            all_manifests = self.registry.get_manifests()
+            all_manifests[plugin_id] = new_manifest
+            try:
+                self.dep_resolver.validate_versions(all_manifests)
+                self.dep_resolver.resolve(all_manifests)
+            except Exception as dep_err:
+                raise PluginDependencyError(
+                    f"Yangi plugin dependency tekshiruvida xatolik: {dep_err}"
+                ) from dep_err
 
-            # 3. Unregister old capabilities and hooks
-            self.capability_registry.unregister_plugin(plugin_id)
-            self.hook_dispatcher.unregister_plugin(plugin_id)
-            self._prompt_contributions = [
-                c for c in self._prompt_contributions if c.plugin_id != plugin_id
+            # Step 3: Staging Initialize & Activate BEFORE touching old_instance
+            token = self.security.issue_token(plugin_id, new_manifest.permissions)
+            new_ctx = PluginContext(plugin_id=plugin_id, config=dict(new_manifest.config), token=token)
+
+            try:
+                init_ok = new_instance.on_initialize(new_ctx)
+                if not init_ok:
+                    raise PluginError(f"Yangi plugin '{plugin_id}' on_initialize muvaffaqiyatsiz")
+
+                activate_ok = new_instance.on_activate(new_ctx)
+                if not activate_ok:
+                    raise PluginError(f"Yangi plugin '{plugin_id}' on_activate muvaffaqiyatsiz")
+
+            except Exception as staging_exc:
+                # Staging failed: clean up new_instance, old_instance remains 100% ACTIVE
+                try:
+                    new_instance.on_unload(new_ctx)
+                    new_instance.on_destroy(new_ctx)
+                except Exception:
+                    pass
+
+                self.event_bus.publish(PluginEvent(
+                    event_type="PLUGIN_RELOAD_FAILED",
+                    source_plugin_id=plugin_id,
+                    payload={"error": str(staging_exc), "rollback": "PRESERVED_UNCHANGED"}
+                ))
+
+                raise PluginError(
+                    f"Hot-reload muvaffaqiyatsiz (staging variantida), eski plugin buzilmagan holda qoldi: {staging_exc}"
+                ) from staging_exc
+
+            # Step 4: Atomic Swap under lock (new_instance is fully initialized and activated)
+            old_prompt_contributions = [
+                c for c in self._prompt_contributions if c.plugin_id == plugin_id
             ]
 
-            # 4. Atomic swap
-            self.registry.set_instance(plugin_id, new_instance)
+            try:
+                # Suspend old
+                try:
+                    old_instance.on_suspend(old_ctx)
+                except Exception as exc:
+                    logger.warning("Old plugin '%s' on_suspend xatolik (davom etiladi): %s", plugin_id, exc)
 
-            # 5. Initialize and activate new
-            token = self.security.issue_token(plugin_id, meta.manifest.permissions)
-            ctx = PluginContext(plugin_id=plugin_id, config=dict(meta.manifest.config), token=token)
-            new_instance.on_initialize(ctx)
-            new_instance.on_activate(ctx)
+                # Unregister old capabilities & hooks
+                self.capability_registry.unregister_plugin(plugin_id)
+                self.hook_dispatcher.unregister_plugin(plugin_id)
+                self._prompt_contributions = [
+                    c for c in self._prompt_contributions if c.plugin_id != plugin_id
+                ]
 
-            # 6. Re-register capabilities, hooks, prompts
-            self._register_plugin_capabilities(plugin_id, new_instance)
-            self._register_plugin_hooks(plugin_id, new_instance)
-            self._register_prompt_contributions(plugin_id, new_instance)
+                # Swap registry instance
+                meta.manifest = new_manifest
+                self.registry.set_instance(plugin_id, new_instance)
 
-            # State stays ACTIVE (valid self-transition)
+                # Register new capabilities & hooks
+                self._register_plugin_capabilities(plugin_id, new_instance)
+                self._register_plugin_hooks(plugin_id, new_instance)
+                self._register_prompt_contributions(plugin_id, new_instance)
+
+                # Unload old instance
+                try:
+                    old_instance.on_unload(old_ctx)
+                except Exception as exc:
+                    logger.warning("Old plugin '%s' on_unload xatolik: %s", plugin_id, exc)
+
+            except Exception as swap_exc:
+                # Swap failed: rollback to old_instance
+                logger.error("Hot-reload swap failed for '%s': %s. Rolling back.", plugin_id, swap_exc)
+                self.registry.set_instance(plugin_id, old_instance)
+                self._register_plugin_capabilities(plugin_id, old_instance)
+                self._register_plugin_hooks(plugin_id, old_instance)
+                self._prompt_contributions.extend(old_prompt_contributions)
+                self._prompt_contributions.sort(key=lambda c: c.priority)
+                try:
+                    old_instance.on_resume(old_ctx)
+                except Exception:
+                    pass
+                raise PluginError(f"Hot-reload swap failed, rolled back to old instance: {swap_exc}") from swap_exc
+
+            # Success
             self.lifecycle.transition(meta, PluginState.ACTIVE)
-
             self.event_bus.publish(PluginEvent(
                 event_type="PLUGIN_RELOADED",
                 source_plugin_id=plugin_id

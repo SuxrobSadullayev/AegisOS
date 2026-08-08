@@ -7,8 +7,8 @@
 *Interactive REPL Shell · Deterministic Execution Pipeline · Epistemic Truth Engine · 12 Quality Gates · Plugin Subsystem*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.1.0--production-green.svg)](CHANGELOG.md)
-[![Build Status](https://img.shields.io/badge/tests-343%20passed-brightgreen.svg)](runtime/tests/)
+[![Version](https://img.shields.io/badge/version-2.2.0--production-green.svg)](CHANGELOG.md)
+[![Build Status](https://img.shields.io/badge/tests-399%2B%20passed-brightgreen.svg)](runtime/tests/)
 
 
 
@@ -287,7 +287,7 @@ Aegis AI OS has undergone rigorous adversarial attack and security validation ac
 
 ## 🧪 Testing & Validation
 
-Run the complete test suite (219 tests passing):
+Run the complete test suite (340+ tests passing):
 
 ```bash
 # Execute full unit, integration, and security test suite
@@ -331,7 +331,7 @@ Aegis AI Framework/
 │   │   ├── quality.py         # Quality Engine & Auto Repair
 │   │   ├── reasoning.py       # Reasoning Engine Subsystem (L1-L3)
 │   │   └── session.py         # Session & Memory Manager
-│   ├── tests/                 # Test Suite (191 Unit & Integration Tests)
+│   ├── tests/                 # Test Suite (340+ Unit & Integration Tests)
 │   └── examples/              # Subsystem Demos & Examples
 └── tools/                     # Code Validators and Linters
 ```
@@ -346,8 +346,10 @@ Aegis AI Framework/
 - [x] Multi-Turn Session Persistence & Token Pruning
 - [x] L3 Deep Analytical Reasoning Decomposition
 - [x] Quality Engine Hardening & 3-Retry Auto-Repair
-- [ ] Process Sandbox Isolation for Untrusted Plugins
+- [x] Process Sandbox Isolation for Untrusted Plugins
+- [x] Production Observability, Audit & Telemetry Subsystem
 - [ ] Remote Package Marketplace Registry Integration
+- [ ] Plugin Marketplace & Package Distribution
 
 ---
 

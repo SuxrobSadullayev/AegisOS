@@ -3,5 +3,6 @@
 *.pyo
 *.swp
 .DS_Store
-runtime/sessions/*.json
-runtime/logs/*.jsonl
+runtime/sessions/
+runtime/logs/
+runtime/marketplace/

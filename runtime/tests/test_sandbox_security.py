@@ -152,8 +152,45 @@ class TestSandboxSecurity(unittest.TestCase):
         # Main test process is still running cleanly!
         self.assertEqual(self.sandbox_mgr.get_worker_status("plugin.crash_test"), "CRASHED")
 
-    def test_security_10_main_runtime_process_isolation(self):
-        """10. Verifies worker PID is distinct from main Aegis runtime process PID."""
+    def test_security_10_advanced_path_traversal_variants_denied(self):
+        """10. Verifies double encoding, Unicode normalization, null bytes, and symlinks are denied."""
+        worker = PluginWorker(SandboxPolicy(allow_filesystem_read=True), "plugin.traversal_adv")
+
+        # Double encoding
+        r1 = worker.process_request(SandboxRequest("FILESYSTEM_READ", {"path": "%252e%252e%252fetc%252fpasswd"}, "p"))
+        self.assertFalse(r1.success)
+        self.assertEqual(r1.error_code, "PATH_TRAVERSAL_DENIED")
+
+        # Unicode normalization
+        r2 = worker.process_request(SandboxRequest("FILESYSTEM_READ", {"path": "\uff0e\uff0e/etc/passwd"}, "p"))
+        self.assertFalse(r2.success)
+        self.assertEqual(r2.error_code, "PATH_TRAVERSAL_DENIED")
+
+        # Null byte injection
+        r3 = worker.process_request(SandboxRequest("FILESYSTEM_READ", {"path": "allowed.txt\x00/etc/passwd"}, "p"))
+        self.assertFalse(r3.success)
+        self.assertEqual(r3.error_code, "PATH_TRAVERSAL_DENIED")
+
+    def test_security_11_path_containment_check(self):
+        """11. Verifies allowed_paths containment check blocks escaping allowed directory."""
+        import tempfile
+        allowed_dir = tempfile.mkdtemp()
+        outside_dir = tempfile.mkdtemp()
+
+        outside_file = os.path.join(outside_dir, "secret.txt")
+        with open(outside_file, "w") as f:
+            f.write("sensitive data")
+
+        policy = SandboxPolicy(allow_filesystem_read=True, allowed_paths=[allowed_dir])
+        worker = PluginWorker(policy, "plugin.containment")
+
+        # Attempt to read file outside allowed_paths
+        r = worker.process_request(SandboxRequest("FILESYSTEM_READ", {"path": outside_file}, "p"))
+        self.assertFalse(r.success)
+        self.assertEqual(r.error_code, "PATH_TRAVERSAL_DENIED")
+
+    def test_security_12_main_runtime_process_isolation(self):
+        """12. Verifies worker PID is distinct from main Aegis runtime process PID."""
         main_pid = os.getpid()
         proc = self.sandbox_mgr.spawn_worker("plugin.pid_test", SandboxPolicy.default_deny())
 

@@ -18,6 +18,118 @@ from runtime.src.plugin import (
 )
 
 
+def handle_marketplace_cli(args: argparse.Namespace, config: AegisConfig) -> None:
+    """Handles Aegis Plugin Marketplace CLI subcommands."""
+    from runtime.src.marketplace import (
+        PluginMarketplaceManager, TrustLevel, PackageValidationError,
+        PackageIntegrityError, SignatureVerificationError, TrustPolicyError
+    )
+    plugins_dir = os.path.join(config.base_dir, "plugins")
+    plugin_mgr = PluginManager(plugins_dir)
+    plugin_mgr.discover_plugins()
+
+    market_mgr = PluginMarketplaceManager(config, plugin_mgr)
+    cmd = getattr(args, "market_command", None)
+
+    if cmd == "search":
+        query = args.query
+        results = market_mgr.local_registry.search(query)
+        print(f"🔍 Aegis Marketplace Qidiruv Natijalari ('{query}'): {len(results)} ta topildi")
+        for e in results:
+            print(f"  - [{e.namespace.upper()}] {e.plugin_id} (v{e.version}) [{e.trust_level.value}] — {e.name}: {e.description}")
+
+    elif cmd == "info":
+        plugin_id = args.name
+        entry = market_mgr.local_registry.get_entry(plugin_id)
+        if not entry:
+            print(f"❌ Plugin '{plugin_id}' marketplace registrida topilmadi.", file=sys.stderr)
+            sys.exit(1)
+        print(f"ℹ️ Aegis Marketplace Plugin Ma'lumotlari ({plugin_id}):")
+        print(json.dumps(entry.to_dict(), indent=2))
+
+    elif cmd == "install":
+        package_path = os.path.abspath(args.package)
+        force = getattr(args, "force_untrusted", False)
+        try:
+            market_mgr.install_package(package_path, force_untrusted=force)
+            print(f"✅ Plugin '{package_path}' muvaffaqiyatli o'rnatildi.")
+        except Exception as exc:
+            print(f"❌ O'rnatishda xatolik: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    elif cmd == "uninstall":
+        plugin_id = args.name
+        if market_mgr.uninstall_plugin(plugin_id):
+            print(f"🗑️ Plugin '{plugin_id}' tizimdan o'chirildi.")
+        else:
+            print(f"❌ Plugin '{plugin_id}' topilmadi.", file=sys.stderr)
+
+    elif cmd == "rollback":
+        plugin_id = args.name
+        version = args.version
+        try:
+            market_mgr.rollback_plugin(plugin_id, version)
+            print(f"🔄 Plugin '{plugin_id}' v{version} versiyasiga rollback qilindi.")
+        except Exception as exc:
+            print(f"❌ Rollback xatolik: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    elif cmd == "verify":
+        package_path = os.path.abspath(args.package)
+        try:
+            manifest, trust, warnings = market_mgr.inspect_and_verify_package(package_path)
+            print(f"🛡️ Package Verification Result ({manifest.plugin_id} v{manifest.version}):")
+            print(f"  - Trust Level : {trust.value}")
+            print(f"  - Publisher   : {manifest.publisher or manifest.author or 'Unknown'}")
+            print(f"  - Warnings    : {'; '.join(warnings)}")
+        except Exception as exc:
+            print(f"❌ Verification failed: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    elif cmd == "publish":
+        path = os.path.abspath(args.path)
+        try:
+            pkg_file = market_mgr.create_package(path)
+            manifest, trust, _ = market_mgr.inspect_and_verify_package(pkg_file)
+            with open(pkg_file, "rb") as f:
+                pkg_bytes = f.read()
+
+            from runtime.src.marketplace import RegistryEntry
+            entry = RegistryEntry(
+                plugin_id=manifest.plugin_id,
+                name=manifest.name,
+                version=manifest.version,
+                description=manifest.description,
+                author=manifest.author,
+                namespace=manifest.namespace,
+                trust_level=trust,
+                package_file=os.path.basename(pkg_file),
+                checksum=manifest.checksum,
+            )
+            market_mgr.local_registry.publish(entry, pkg_bytes)
+            print(f"🚀 Plugin '{manifest.plugin_id}' v{manifest.version} local registry'ga chop etildi ({pkg_file}).")
+        except Exception as exc:
+            print(f"❌ Publish xatolik: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    elif cmd == "list":
+        available = market_mgr.local_registry.list_available()
+        print(f"📦 Aegis Marketplace Registridagi Pluginlar ({len(available)} ta):")
+        for e in available:
+            print(f"  - [{e.namespace.upper()}] {e.plugin_id} (v{e.version}) [{e.trust_level.value}] — {e.name}")
+
+    elif cmd == "trust":
+        key_id = args.key_id
+        secret = args.secret
+        market_mgr.key_store.add_key(key_id, secret)
+        print(f"🔑 Key '{key_id}' TrustedKeyStore ga qo'shildi.")
+
+    elif cmd == "block":
+        plugin_id = args.name
+        market_mgr.key_store.block_plugin(plugin_id)
+        print(f"🚫 Plugin '{plugin_id}' blacklisted / blocked qilindi.")
+
+
 def handle_plugin_cli(args: argparse.Namespace, config: AegisConfig) -> None:
     """Handles Aegis Plugin SDK CLI subcommands."""
     plugins_dir = os.path.join(config.base_dir, "plugins")
@@ -404,8 +516,41 @@ def main():
     enable_p = plugin_subparsers.add_parser("enable", help="Pluginni yoqish")
     enable_p.add_argument("name", help="Plugin ID")
 
-    disable_p = plugin_subparsers.add_parser("disable", help="Pluginni o'chirish")
-    disable_p.add_argument("name", help="Plugin ID")
+    # Marketplace subcommand
+    market_parser = subparsers.add_parser("marketplace", help="Aegis Plugin Marketplace & Supply Chain buyruqlari")
+    market_subparsers = market_parser.add_subparsers(dest="market_command")
+
+    m_search = market_subparsers.add_parser("search", help="Marketplace registrida plaginlarni qidirish")
+    m_search.add_argument("query", help="Qidiruv kalit so'zi")
+
+    m_info = market_subparsers.add_parser("info", help="Registrdagi plagin ma'lumotlarini ko'rish")
+    m_info.add_argument("name", help="Plugin ID")
+
+    m_inst = market_subparsers.add_parser("install", help="Plagin paketini o'rnatish")
+    m_inst.add_argument("package", help="Package (.aegis-plugin) yo'li")
+    m_inst.add_argument("--force-untrusted", action="store_true", help="Imzolanmagan plaginlarni local dev rejimida o'rnatish")
+
+    m_uninst = market_subparsers.add_parser("uninstall", help="Plaginni tizimdan o'chirish")
+    m_uninst.add_argument("name", help="Plugin ID")
+
+    m_roll = market_subparsers.add_parser("rollback", help="Plaginni eski versiyasiga qaytarish")
+    m_roll.add_argument("name", help="Plugin ID")
+    m_roll.add_argument("version", help="Qaytariladigan versiya")
+
+    m_ver = market_subparsers.add_parser("verify", help="Plagin paketini va raqamli imzoni tekshirish")
+    m_ver.add_argument("package", help="Package file yo'li")
+
+    m_pub = market_subparsers.add_parser("publish", help="Plaginni local registrga chop etish")
+    m_pub.add_argument("path", help="Plugin papkasi yo'li")
+
+    market_subparsers.add_parser("list", help="Marketplace registridagi barcha plaginlarni ko'rish")
+
+    m_tr = market_subparsers.add_parser("trust", help="TrustedKeyStore ga yangi kalit qo'shish")
+    m_tr.add_argument("key_id", help="Key ID")
+    m_tr.add_argument("secret", help="HMAC Secret Key")
+
+    m_blk = market_subparsers.add_parser("block", help="Pluginni blacklist qilish")
+    m_blk.add_argument("name", help="Plugin ID")
 
     # Top-level arguments
     parser.add_argument("--task", "-t", help="Task description or prompt for single-shot Aegis execution")
@@ -483,6 +628,10 @@ def main():
 
     if args.subcommand == "plugin":
         handle_plugin_cli(args, config)
+        return
+
+    if args.subcommand == "marketplace":
+        handle_marketplace_cli(args, config)
         return
 
     if args.subcommand == "chat":

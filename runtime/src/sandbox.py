@@ -65,6 +65,7 @@ class SandboxPolicy:
     allow_network: bool = False
     allow_subprocess: bool = False
     allow_env_access: bool = False
+    allowed_paths: List[str] = field(default_factory=list)
     limits: SandboxLimits = field(default_factory=SandboxLimits)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -74,6 +75,7 @@ class SandboxPolicy:
             "allow_network": self.allow_network,
             "allow_subprocess": self.allow_subprocess,
             "allow_env_access": self.allow_env_access,
+            "allowed_paths": self.allowed_paths,
             "limits": asdict(self.limits)
         }
 
@@ -92,6 +94,7 @@ class SandboxPolicy:
             allow_network=data.get("allow_network", False),
             allow_subprocess=data.get("allow_subprocess", False),
             allow_env_access=data.get("allow_env_access", False),
+            allowed_paths=data.get("allowed_paths", []),
             limits=limits
         )
 
@@ -116,6 +119,7 @@ class SandboxRequest:
     plugin_id: str
     capability_token: Optional[str] = None
     request_id: str = field(default_factory=lambda: f"REQ_{time.time_ns()}")
+    correlation_context: Optional[Dict[str, str]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -123,7 +127,8 @@ class SandboxRequest:
             "payload": self.payload,
             "plugin_id": self.plugin_id,
             "capability_token": self.capability_token,
-            "request_id": self.request_id
+            "request_id": self.request_id,
+            "correlation_context": self.correlation_context
         }
 
     @classmethod
@@ -133,7 +138,8 @@ class SandboxRequest:
             payload=data.get("payload", {}),
             plugin_id=data.get("plugin_id", ""),
             capability_token=data.get("capability_token"),
-            request_id=data.get("request_id", f"REQ_{time.time_ns()}")
+            request_id=data.get("request_id", f"REQ_{time.time_ns()}"),
+            correlation_context=data.get("correlation_context")
         )
 
 
@@ -226,6 +232,21 @@ class PluginWorker:
         start_time = time.time()
         cmd = request.command.upper()
 
+        # Restore correlation context inside worker process for tracing
+        if request.correlation_context:
+            try:
+                from runtime.src.observability import CorrelationContext
+                CorrelationContext.set_context(
+                    correlation_id=request.correlation_context.get("correlation_id"),
+                    session_id=request.correlation_context.get("session_id"),
+                    request_id=request.correlation_context.get("request_id"),
+                    trace_id=request.correlation_context.get("trace_id"),
+                )
+                if request.correlation_context.get("span_id"):
+                    CorrelationContext.push_span(request.correlation_context["span_id"])
+            except Exception:
+                pass
+
         if cmd == "PING" or cmd == "HEALTHCHECK":
             return SandboxResponse(
                 success=True,
@@ -254,16 +275,47 @@ class PluginWorker:
                     request_id=request.request_id
                 )
             target_path = request.payload.get("path", "")
-            if not target_path or ".." in target_path or target_path.startswith("/etc") or target_path.startswith("/proc"):
+            path_error = self._validate_path_security(target_path)
+            if path_error:
                 return SandboxResponse(
                     success=False,
-                    error=f"Path traversal or restricted file access DENIED: {target_path}",
+                    error=path_error,
                     error_code="PATH_TRAVERSAL_DENIED",
                     request_id=request.request_id
                 )
             try:
-                if os.path.exists(target_path) and os.path.isfile(target_path):
-                    with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
+                resolved = os.path.realpath(os.path.abspath(target_path))
+                # Re-validate resolved path (symlink protection)
+                resolved_error = self._validate_path_security(resolved)
+                if resolved_error:
+                    return SandboxResponse(
+                        success=False,
+                        error=f"Symlink resolved path violation: {resolved_error}",
+                        error_code="PATH_TRAVERSAL_DENIED",
+                        request_id=request.request_id
+                    )
+
+                # Containment check if allowed_paths are configured
+                if self.policy.allowed_paths:
+                    is_contained = False
+                    for allowed in self.policy.allowed_paths:
+                        real_allowed = os.path.realpath(os.path.abspath(allowed))
+                        if resolved == real_allowed or resolved.startswith(real_allowed.rstrip(os.sep) + os.sep):
+                            is_contained = True
+                            break
+                    if not is_contained:
+                        return SandboxResponse(
+                            success=False,
+                            error=f"Path containment violation: '{target_path}' resolves to '{resolved}' which is outside allowed_paths {self.policy.allowed_paths}",
+                            error_code="PATH_TRAVERSAL_DENIED",
+                            request_id=request.request_id
+                        )
+
+                if os.path.exists(resolved) and os.path.isfile(resolved):
+                    # TOCTOU protection: Use O_NOFOLLOW when opening to prevent symlink swaps
+                    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)
+                    fd = os.open(resolved, flags)
+                    with os.fdopen(fd, "r", encoding="utf-8", errors="ignore") as f:
                         content = f.read(1024 * 1024)
                     return SandboxResponse(
                         success=True,
@@ -295,16 +347,47 @@ class PluginWorker:
                 )
             target_path = request.payload.get("path", "")
             content = request.payload.get("content", "")
-            if not target_path or ".." in target_path or target_path.startswith("/etc") or target_path.startswith("/bin"):
+            path_error = self._validate_path_security(target_path)
+            if path_error:
                 return SandboxResponse(
                     success=False,
-                    error=f"Restricted write path DENIED: {target_path}",
+                    error=path_error,
                     error_code="PATH_TRAVERSAL_DENIED",
                     request_id=request.request_id
                 )
             try:
-                os.makedirs(os.path.dirname(os.path.abspath(target_path)), exist_ok=True)
-                with open(target_path, "w", encoding="utf-8") as f:
+                resolved = os.path.realpath(os.path.abspath(target_path))
+                # Re-validate resolved path (symlink protection)
+                resolved_error = self._validate_path_security(resolved)
+                if resolved_error:
+                    return SandboxResponse(
+                        success=False,
+                        error=f"Symlink resolved path violation: {resolved_error}",
+                        error_code="PATH_TRAVERSAL_DENIED",
+                        request_id=request.request_id
+                    )
+
+                # Containment check if allowed_paths are configured
+                if self.policy.allowed_paths:
+                    is_contained = False
+                    for allowed in self.policy.allowed_paths:
+                        real_allowed = os.path.realpath(os.path.abspath(allowed))
+                        if resolved == real_allowed or resolved.startswith(real_allowed.rstrip(os.sep) + os.sep):
+                            is_contained = True
+                            break
+                    if not is_contained:
+                        return SandboxResponse(
+                            success=False,
+                            error=f"Path containment violation: '{target_path}' resolves to '{resolved}' which is outside allowed_paths {self.policy.allowed_paths}",
+                            error_code="PATH_TRAVERSAL_DENIED",
+                            request_id=request.request_id
+                        )
+
+                os.makedirs(os.path.dirname(resolved), exist_ok=True)
+                # TOCTOU protection: Use O_NOFOLLOW when opening to prevent symlink swaps
+                flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0)
+                fd = os.open(resolved, flags, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
                     f.write(content)
                 return SandboxResponse(
                     success=True,
@@ -383,6 +466,65 @@ class PluginWorker:
             metrics={"execution_time_ms": exec_time},
             request_id=request.request_id
         )
+
+    # ── Taqiqlangan yo'llar (path traversal va privilege escalation himoyasi) ──
+    _BLOCKED_PATH_PREFIXES = (
+        "/etc", "/proc", "/sys", "/dev", "/bin", "/sbin",
+        "/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin",
+        "/boot", "/root", "/var/run", "/var/log", "/run",
+    )
+
+    _BLOCKED_PATH_SUFFIXES = (
+        ".ssh", "shadow", "passwd", ".gnupg", ".aws", ".azure",
+        ".kube", "id_rsa", "id_ed25519", "authorized_keys",
+    )
+
+    def _validate_path_security(self, path: str) -> Optional[str]:
+        """Validates a filesystem path against security rules.
+
+        Returns None if path is safe, or an error message string if blocked.
+        Protects against: path traversal (..), null bytes, URL encoding,
+        Unicode normalization tricks, restricted directories, and sensitive file access.
+        """
+        import urllib.parse
+        import unicodedata
+
+        if not path:
+            return "Empty path DENIED"
+
+        # Null byte injection check
+        if "\x00" in path or "%00" in path:
+            return "Null byte injection DENIED"
+
+        # Recursive URL unquoting (up to 3 levels)
+        decoded = str(path)
+        for _ in range(3):
+            unquoted = urllib.parse.unquote(decoded)
+            if unquoted == decoded:
+                break
+            decoded = unquoted
+
+        # Unicode NFKC normalization to collapse fullwidth characters e.g. \uff0e -> .
+        normalized_str = unicodedata.normalize('NFKC', decoded)
+
+        # Check path traversal variants
+        if ".." in normalized_str or ".." in path or "\\.." in normalized_str:
+            return f"Path traversal DENIED: {path}"
+
+        # Normalize path separators for comparison
+        normalized = os.path.normpath(normalized_str)
+
+        # Check blocked prefixes
+        for prefix in self._BLOCKED_PATH_PREFIXES:
+            if normalized.startswith(prefix) or normalized_str.startswith(prefix):
+                return f"Restricted path access DENIED: {path}"
+
+        # Check blocked suffixes
+        for suffix in self._BLOCKED_PATH_SUFFIXES:
+            if normalized.endswith(suffix) or f"/{suffix}" in normalized or f"/{suffix}/" in normalized:
+                return f"Sensitive file access DENIED: {path}"
+
+        return None  # Path is allowed
 
     def _check_permission_allowed(self, perm: str) -> bool:
         perm_u = perm.upper()
@@ -474,6 +616,19 @@ class SandboxManager:
     def send_request(self, plugin_id: str, request: SandboxRequest, timeout_sec: Optional[float] = None) -> SandboxResponse:
         """Sends an IPC request to a plugin worker with strict timeout protection."""
         with self._lock:
+            # Auto-attach current thread-local CorrelationContext for process boundary tracing
+            if request.correlation_context is None:
+                try:
+                    from runtime.src.observability import CorrelationContext
+                    request.correlation_context = {
+                        "correlation_id": CorrelationContext.get_correlation_id(),
+                        "session_id": CorrelationContext.get_session_id(),
+                        "request_id": CorrelationContext.get_request_id(),
+                        "trace_id": CorrelationContext.get_trace_id(),
+                        "span_id": CorrelationContext.get_current_span_id(),
+                    }
+                except Exception:
+                    pass
             policy = self._policies.get(plugin_id, SandboxPolicy.default_deny())
             exec_timeout = timeout_sec if timeout_sec is not None else policy.limits.execution_timeout_sec
 
