@@ -130,6 +130,50 @@ def handle_marketplace_cli(args: argparse.Namespace, config: AegisConfig) -> Non
         print(f"🚫 Plugin '{plugin_id}' blacklisted / blocked qilindi.")
 
 
+def handle_agents_cli(args: argparse.Namespace, config: AegisConfig) -> None:
+    """Handles Aegis Agent Coordination CLI subcommands."""
+    from runtime.src.agents import AgentRegistry, AgentDescriptor, AgentTrustLevel
+
+    registry = AgentRegistry()
+    cmd = getattr(args, "agent_command", None) or args.subcommand
+
+    if cmd in ("agents", "list"):
+        agents = registry.list_agents()
+        print(f"🤖 Aegis Agentlar Ro'yxati ({len(agents)} ta ro'yxatdan o'tgan):")
+        if not agents:
+            print("  (Hozircha faol agentlar yo'q. Built-in kernel agentlar registratsiya qilinmagan)")
+        for a in agents:
+            print(f"  - [{a.trust_level.value}] {a.agent_id} (v{a.version}) — {a.name}: {', '.join(a.supported_task_types)}")
+
+    elif cmd == "info":
+        agent_id = getattr(args, "name", "")
+        desc = registry.get_descriptor(agent_id)
+        if not desc:
+            print(f"❌ Agent '{agent_id}' topilmadi.", file=sys.stderr)
+            sys.exit(1)
+        print(f"ℹ️ Agent Ma'lumotlari ({agent_id}):")
+        print(json.dumps(desc.to_dict(), indent=2))
+
+    elif cmd == "events":
+        from runtime.src.observability import ObservabilityManager
+        obs = ObservabilityManager.get_instance()
+        events = obs.read_logs(tail=50, category="PIPELINE")
+        agent_events = [e for e in events if "AGENT" in str(e.get("event_type", "")) or "AGENT" in str(e.get("component", ""))]
+        print(f"📡 Aegis Multi-Agent Event Bus Telemetriyasi ({len(agent_events)} ta hodisa topildi):")
+        for e in agent_events:
+            print(f"  [{e.get('timestamp')}] [{e.get('level')}] Component: {e.get('component')} — {e.get('message')}")
+
+    elif cmd == "tasks":
+        from runtime.src.observability import ObservabilityManager
+        obs = ObservabilityManager.get_instance()
+        summary = obs.metrics.get_metrics_summary()
+        print("📊 Aegis Task Coordinator Telemetriya Metrikalari:")
+        print("--------------------------------------------------")
+        for k, v in summary.get("counters", {}).items():
+            if "TASK" in k or "AGENT" in k:
+                print(f"  • {k}: {v}")
+
+
 def handle_plugin_cli(args: argparse.Namespace, config: AegisConfig) -> None:
     """Handles Aegis Plugin SDK CLI subcommands."""
     plugins_dir = os.path.join(config.base_dir, "plugins")
@@ -552,6 +596,18 @@ def main():
     m_blk = market_subparsers.add_parser("block", help="Pluginni blacklist qilish")
     m_blk.add_argument("name", help="Plugin ID")
 
+    # Multi-Agent Subsystem commands
+    subparsers.add_parser("agents", help="List all registered Aegis AI agents")
+
+    agent_parser = subparsers.add_parser("agent", help="Aegis Agent Management buyruqlari")
+    agent_subparsers = agent_parser.add_subparsers(dest="agent_command")
+    ag_info = agent_subparsers.add_parser("info", help="Agent haqida ma'lumot olish")
+    ag_info.add_argument("name", help="Agent ID")
+    agent_subparsers.add_parser("list", help="Agentlarni ro'yxatga olish")
+
+    subparsers.add_parser("events", help="Aegis Multi-Agent Event Bus telemetriyasini ko'rish")
+    subparsers.add_parser("tasks", help="Aegis Task Coordinator metrikalarini ko'rish")
+
     # Top-level arguments
     parser.add_argument("--task", "-t", help="Task description or prompt for single-shot Aegis execution")
     parser.add_argument("--session", "-s", help="Target session ID for multi-turn execution")
@@ -620,6 +676,10 @@ def main():
             print(f"  [{entry.get('timestamp')}] [{entry.get('level')}] [{entry.get('event_type')}] Component: {entry.get('component')} — {entry.get('message')}")
         return
 
+
+    if args.subcommand in ("agents", "agent", "events", "tasks"):
+        handle_agents_cli(args, config)
+        return
 
     if args.subcommand == "plugins":
         args.plugin_command = "list"

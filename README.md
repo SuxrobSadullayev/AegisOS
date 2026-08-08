@@ -7,8 +7,8 @@
 *Interactive REPL Shell · Deterministic Execution Pipeline · Epistemic Truth Engine · 12 Quality Gates · Plugin Subsystem*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.2.0--production-green.svg)](CHANGELOG.md)
-[![Build Status](https://img.shields.io/badge/tests-399%2B%20passed-brightgreen.svg)](runtime/tests/)
+[![Version](https://img.shields.io/badge/version-2.3.0--production-green.svg)](CHANGELOG.md)
+[![Build Status](https://img.shields.io/badge/tests-418%2B%20passed-brightgreen.svg)](runtime/tests/)
 
 
 
